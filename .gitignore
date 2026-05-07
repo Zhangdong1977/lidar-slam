@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+install/
+log/
+
+# Large archives
+*.tar.xz
+*.tar.gz
+*.zip
+
+# Third-party workspaces (build artifacts)
+third-party/rplidar_ws/
+third-party/src/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated files
+*.gv
+*.pdf

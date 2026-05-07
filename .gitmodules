@@ -1,0 +1,6 @@
+[submodule "third-party/slam_toolbox"]
+	path = third-party/slam_toolbox
+	url = https://github.com/SteveMacenski/slam_toolbox.git
+[submodule "third-party/rplidar_sdk"]
+	path = third-party/rplidar_sdk
+	url = https://github.com/slamtec/rplidar_sdk.git
