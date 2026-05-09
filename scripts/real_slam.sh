@@ -10,6 +10,11 @@
 
 set -e
 
+# 项目根目录: 优先使用环境变量，否则从脚本位置自动探测
+: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+export LIDAR_SLAM_ROOT
+echo "[INFO] LIDAR_SLAM_ROOT=$LIDAR_SLAM_ROOT"
+
 # ROS2 环境
 # 局域网远程查看: 两边设置相同的 ROS_DOMAIN_ID
 : "${ROS_DOMAIN_ID:=42}"
@@ -17,10 +22,10 @@ export ROS_DOMAIN_ID
 echo "[INFO] ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 
 source /opt/ros/jazzy/setup.bash
-source /home/pi/Desktop/code/lidar-slam/third-party/rplidar_ws/install/setup.bash
+source "$LIDAR_SLAM_ROOT/third-party/rplidar_ws/install/setup.bash"
 
-LAUNCH_FILE="/home/pi/Desktop/code/lidar-slam/launch/real_slam.launch.py"
-RVIZ_CONFIG="/home/pi/Desktop/code/lidar-slam/config/slam.rviz"
+LAUNCH_FILE="$LIDAR_SLAM_ROOT/launch/real_slam.launch.py"
+RVIZ_CONFIG="$LIDAR_SLAM_ROOT/config/slam.rviz"
 
 MODE="${1:-all}"
 
