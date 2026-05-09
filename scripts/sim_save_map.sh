@@ -5,7 +5,7 @@
 set -e
 
 MAP_NAME="${1:-sim_test_map}"
-MAP_DIR="/home/pi/lidar-slam/maps"
+MAP_DIR="/home/pi/Desktop/code/lidar-slam/maps"
 
 source /opt/ros/jazzy/setup.bash
 

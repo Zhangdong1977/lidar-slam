@@ -10,7 +10,7 @@ from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
-    project_dir = '/home/pi/lidar-slam'
+    project_dir = '/home/pi/Desktop/code/lidar-slam'
     slam_params = os.path.join(project_dir, 'config', 'slam_toolbox_real.yaml')
     rviz_config = os.path.join(project_dir, 'config', 'slam.rviz')
 
@@ -24,16 +24,30 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 2. 静态 TF: odom -> laser（无里程计时 slam_toolbox 需要）
+    # 2. rf2o 激光里程计: odom -> base_link
+    rf2o = Node(
+        package='rf2o_laser_odometry',
+        executable='rf2o_laser_odometry_node',
+        name='rf2o_laser_odometry',
+        parameters=[{
+            'base_frame_id': 'base_link',
+            'odom_frame_id': 'odom',
+            'laser_scan_topic': '/scan',
+            'init_pose_from_topic': '',
+        }],
+        output='screen',
+    )
+
+    # 3. 静态 TF: base_link -> laser
     static_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         arguments=['--x', '0', '--y', '0', '--z', '0',
                    '--roll', '0', '--pitch', '0', '--yaw', '0',
-                   '--frame-id', 'odom', '--child-frame-id', 'laser'],
+                   '--frame-id', 'base_link', '--child-frame-id', 'laser'],
     )
 
-    # 3. slam_toolbox online_async
+    # 4. slam_toolbox online_async
     slam_toolbox = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             os.path.join(
@@ -46,7 +60,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 4. RViz2
+    # 5. RViz2
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
@@ -64,6 +78,7 @@ def generate_launch_description():
             'rviz', default_value='true',
             description='Whether to launch rviz2'),
         rplidar,
+        rf2o,
         static_tf,
         slam_toolbox,
         rviz2,

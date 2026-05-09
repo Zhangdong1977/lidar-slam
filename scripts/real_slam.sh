@@ -20,9 +20,9 @@ fi
 
 # ROS2 环境
 source /opt/ros/jazzy/setup.bash
-source /home/pi/lidar-slam/third-party/rplidar_ws/install/setup.bash
+source /home/pi/Desktop/code/lidar-slam/third-party/rplidar_ws/install/setup.bash
 
-LAUNCH_FILE="/home/pi/lidar-slam/launch/real_slam.launch.py"
+LAUNCH_FILE="/home/pi/Desktop/code/lidar-slam/launch/real_slam.launch.py"
 
 if [ "$1" = "--no-gui" ]; then
     exec ros2 launch "$LAUNCH_FILE" serial_port:="$SERIAL_PORT" rviz:=false

@@ -6,4 +6,4 @@ set -e
 
 source /opt/ros/jazzy/setup.bash
 
-exec python3 /home/pi/lidar-slam/scripts/sim_teleop.py
+exec python3 /home/pi/Desktop/code/lidar-slam/scripts/sim_teleop.py

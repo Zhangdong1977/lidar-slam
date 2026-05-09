@@ -29,7 +29,7 @@ done
 
 # ROS2 环境
 source /opt/ros/jazzy/setup.bash
-source /home/pi/lidar-slam/third-party/rplidar_ws/install/setup.bash
+source /home/pi/Desktop/code/lidar-slam/third-party/rplidar_ws/install/setup.bash
 
 if [ "$1" = "--no-gui" ]; then
     exec ros2 launch rplidar_ros rplidar_s2.launch.py serial_port:=$SERIAL_PORT

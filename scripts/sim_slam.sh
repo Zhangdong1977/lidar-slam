@@ -16,4 +16,4 @@ done
 # ROS2 环境
 source /opt/ros/jazzy/setup.bash
 
-exec ros2 launch /home/pi/lidar-slam/launch/sim_slam.launch.py
+exec ros2 launch /home/pi/Desktop/code/lidar-slam/launch/sim_slam.launch.py

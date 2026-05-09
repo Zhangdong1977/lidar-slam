@@ -8,7 +8,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    project_dir = '/home/pi/lidar-slam'
+    project_dir = '/home/pi/Desktop/code/lidar-slam'
     world_file = os.path.join(project_dir, 'worlds', 'slam_test.sdf')
     slam_params = os.path.join(project_dir, 'config', 'slam_toolbox_sim.yaml')
 
