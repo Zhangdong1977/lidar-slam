@@ -10,20 +10,6 @@
 
 set -e
 
-# 自动检测串口设备
-SERIAL_PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -1)
-if [ -z "$SERIAL_PORT" ]; then
-    echo "[ERROR] 未找到串口设备 /dev/ttyUSB*"
-    exit 1
-fi
-echo "[INFO] 使用串口: $SERIAL_PORT"
-
-# 串口权限检查
-if [ ! -w "$SERIAL_PORT" ]; then
-    echo "[WARN] $SERIAL_PORT 无写入权限，尝试修复..."
-    sudo chmod 666 "$SERIAL_PORT"
-fi
-
 # ROS2 环境
 # 局域网远程查看: 两边设置相同的 ROS_DOMAIN_ID
 : "${ROS_DOMAIN_ID:=42}"
@@ -37,6 +23,21 @@ LAUNCH_FILE="/home/pi/Desktop/code/lidar-slam/launch/real_slam.launch.py"
 RVIZ_CONFIG="/home/pi/Desktop/code/lidar-slam/config/slam.rviz"
 
 MODE="${1:-all}"
+
+# 仅 all 和 mapping 需要串口
+if [ "$MODE" = "all" ] || [ "$MODE" = "mapping" ]; then
+    SERIAL_PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -1)
+    if [ -z "$SERIAL_PORT" ]; then
+        echo "[ERROR] 未找到串口设备 /dev/ttyUSB*"
+        exit 1
+    fi
+    echo "[INFO] 使用串口: $SERIAL_PORT"
+
+    if [ ! -w "$SERIAL_PORT" ]; then
+        echo "[WARN] $SERIAL_PORT 无写入权限，尝试修复..."
+        sudo chmod 666 "$SERIAL_PORT"
+    fi
+fi
 
 case "$MODE" in
     all)
