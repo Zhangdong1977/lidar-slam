@@ -1,6 +1,12 @@
 #!/bin/bash
 # 启动 RPLIDAR S2 在线 SLAM 建图
-# 用法: ./scripts/real_slam.sh [--no-gui]
+#
+# 用法:
+#   ./scripts/real_slam.sh all      # 建图 + RViz (默认)
+#   ./scripts/real_slam.sh mapping  # 仅建图（无RViz，省CPU）
+#   ./scripts/real_slam.sh rviz     # 仅RViz（需先启动mapping）
+#
+# 注意: mapping 和 rviz 必须在同一台机器或网络内
 
 set -e
 
@@ -19,21 +25,55 @@ if [ ! -w "$SERIAL_PORT" ]; then
 fi
 
 # ROS2 环境
+# 局域网远程查看: 两边设置相同的 ROS_DOMAIN_ID
+: "${ROS_DOMAIN_ID:=42}"
+export ROS_DOMAIN_ID
+echo "[INFO] ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
+
 source /opt/ros/jazzy/setup.bash
 source /home/pi/Desktop/code/lidar-slam/third-party/rplidar_ws/install/setup.bash
 
 LAUNCH_FILE="/home/pi/Desktop/code/lidar-slam/launch/real_slam.launch.py"
+RVIZ_CONFIG="/home/pi/Desktop/code/lidar-slam/config/slam.rviz"
 
-if [ "$1" = "--no-gui" ]; then
-    exec ros2 launch "$LAUNCH_FILE" serial_port:="$SERIAL_PORT" rviz:=false
-else
-    # GUI 程序需要
-    export DISPLAY=:0
-    for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthority; do
-        if [ -f "$auth" ]; then
-            export XAUTHORITY="$auth"
-            break
-        fi
-    done
-    exec ros2 launch "$LAUNCH_FILE" serial_port:="$SERIAL_PORT"
-fi
+MODE="${1:-all}"
+
+case "$MODE" in
+    all)
+        echo "[INFO] 启动模式: 建图 + RViz"
+        export DISPLAY=:0
+        for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthority; do
+            if [ -f "$auth" ]; then
+                export XAUTHORITY="$auth"
+                break
+            fi
+        done
+        exec ros2 launch "$LAUNCH_FILE" serial_port:="$SERIAL_PORT" rviz:=true
+        ;;
+
+    mapping)
+        echo "[INFO] 启动模式: 仅建图（无RViz）"
+        exec ros2 launch "$LAUNCH_FILE" serial_port:="$SERIAL_PORT" rviz:=false
+        ;;
+
+    rviz)
+        echo "[INFO] 启动模式: 仅RViz"
+        export DISPLAY=:0
+        for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthority; do
+            if [ -f "$auth" ]; then
+                export XAUTHORITY="$auth"
+                break
+            fi
+        done
+        exec rviz2 -d "$RVIZ_CONFIG"
+        ;;
+
+    *)
+        echo "用法: $0 {all|mapping|rviz}"
+        echo ""
+        echo "  all     - 建图 + RViz (默认)"
+        echo "  mapping - 仅建图，无RViz，省CPU"
+        echo "  rviz    - 仅启动RViz，需先运行 mapping"
+        exit 1
+        ;;
+esac
