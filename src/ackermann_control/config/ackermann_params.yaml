@@ -1,0 +1,8 @@
+vehicle_controller:
+  ros__parameters:
+    body_length: 0.9
+    body_width: 0.6
+    wheel_radius: 0.16
+    wheel_width: 0.08
+    max_steering_angle: 0.5236
+    max_velocity: 1.4
