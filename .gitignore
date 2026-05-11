@@ -16,6 +16,9 @@ third-party/src/
 __pycache__/
 *.pyc
 
+# Worktrees
+.worktrees/
+
 # Generated files
 *.gv
 *.pdf
