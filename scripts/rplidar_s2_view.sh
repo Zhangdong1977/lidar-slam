@@ -18,6 +18,9 @@ if [ ! -w "$SERIAL_PORT" ]; then
     sudo chmod 666 "$SERIAL_PORT"
 fi
 
+# 项目根目录: 优先使用环境变量，否则从脚本位置自动探测
+: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+
 # GUI 程序需要
 export DISPLAY=:0
 for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthority; do
@@ -29,7 +32,7 @@ done
 
 # ROS2 环境
 source /opt/ros/jazzy/setup.bash
-source /home/pi/Desktop/code/lidar-slam/third-party/rplidar_ws/install/setup.bash
+source "$LIDAR_SLAM_ROOT/third-party/rplidar_ws/install/setup.bash"
 
 if [ "$1" = "--no-gui" ]; then
     exec ros2 launch rplidar_ros rplidar_s2.launch.py serial_port:=$SERIAL_PORT

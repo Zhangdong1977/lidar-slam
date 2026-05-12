@@ -62,10 +62,6 @@ def vels(speed, turn):
 
 
 def main():
-    # Save terminal settings for restoration
-    old_settings = termios.tcgetattr(sys.stdin)
-    tty.setraw(sys.stdin.fileno())
-
     rclpy.init()
     node = rclpy.create_node('teleop_twist_keyboard')
 
@@ -83,8 +79,13 @@ def main():
     stale_count = 0
     stale_limit = 8
 
+    # Print before raw mode to avoid staircase effect (raw mode needs \r\n)
     print(MSG)
     print(vels(speed, turn))
+
+    # Save terminal settings for restoration
+    old_settings = termios.tcgetattr(sys.stdin)
+    tty.setraw(sys.stdin.fileno())
 
     try:
         while rclpy.ok():
@@ -101,9 +102,10 @@ def main():
                 elif key in SPEED_BINDINGS:
                     speed *= SPEED_BINDINGS[key][0]
                     turn *= SPEED_BINDINGS[key][1]
-                    print(vels(speed, turn))
+                    # Raw mode: \n won't trigger carriage return, so we need \r\n
+                    sys.stdout.write(vels(speed, turn) + '\r\n')
                     if status == 14:
-                        print(MSG)
+                        sys.stdout.write(MSG.replace('\n', '\r\n') + '\r\n')
                     status = (status + 1) % 15
                     stale_count = 0
                 elif key == '\x03':
@@ -134,7 +136,7 @@ def main():
             rclpy.spin_once(node, timeout_sec=0.001)
 
     except Exception as e:
-        print(e)
+        sys.stdout.write(str(e) + '\r\n')
     finally:
         # Publish zero and cleanup
         twist.linear.x = 0.0

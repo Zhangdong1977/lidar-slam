@@ -5,15 +5,15 @@
   <xacro:property name="body_length" value="0.9"/>
   <xacro:property name="body_width" value="0.6"/>
   <xacro:property name="body_height" value="0.4"/>
-  <xacro:property name="body_density" value="350.0"/>
+  <xacro:property name="body_density" value="150.0"/>
   <xacro:property name="wheel_radius" value="0.16"/>
   <xacro:property name="wheel_width" value="0.08"/>
   <xacro:property name="wheel_density" value="900.0"/>
   <xacro:property name="max_steering_angle" value="0.5236"/>
   <xacro:property name="max_steering_angular_velocity" value="1.570796"/>
-  <xacro:property name="max_steering_effort" value="50.0"/>
+  <xacro:property name="max_steering_effort" value="100.0"/>
   <xacro:property name="max_velocity" value="1.4"/>
-  <xacro:property name="max_effort" value="50.0"/>
+  <xacro:property name="max_effort" value="100.0"/>
   <xacro:property name="PI" value="3.14159265"/>
 
   <!-- Derived properties -->
@@ -90,6 +90,16 @@
         <color rgba="0.0 0.0 0.0 1.0"/>
       </material>
     </visual>
+    <!-- Rotation marker stripe (visual only) -->
+    <visual>
+      <origin xyz="${wheel_radius} 0 0" rpy="0 1.570795 0"/>
+      <geometry>
+        <box size="${wheel_width * 0.8} ${wheel_radius * 0.3} ${wheel_radius * 0.15}"/>
+      </geometry>
+      <material name="stripe_material_fl">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.570795 0 0"/>
       <geometry>
@@ -138,6 +148,16 @@
         <color rgba="0.0 0.0 0.0 1.0"/>
       </material>
     </visual>
+    <!-- Rotation marker stripe (visual only) -->
+    <visual>
+      <origin xyz="${wheel_radius} 0 0" rpy="0 1.570795 0"/>
+      <geometry>
+        <box size="${wheel_width * 0.8} ${wheel_radius * 0.3} ${wheel_radius * 0.15}"/>
+      </geometry>
+      <material name="stripe_material_fr">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.570795 0 0"/>
       <geometry>
@@ -160,6 +180,16 @@
       </geometry>
       <material name="wheel_material">
         <color rgba="0.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <!-- Rotation marker stripe (visual only) -->
+    <visual>
+      <origin xyz="${wheel_radius} 0 0" rpy="0 1.570795 0"/>
+      <geometry>
+        <box size="${wheel_width * 0.8} ${wheel_radius * 0.3} ${wheel_radius * 0.15}"/>
+      </geometry>
+      <material name="stripe_material_rl">
+        <color rgba="1.0 0.0 0.0 1.0"/>
       </material>
     </visual>
     <collision>
@@ -186,6 +216,16 @@
         <color rgba="0.0 0.0 0.0 1.0"/>
       </material>
     </visual>
+    <!-- Rotation marker stripe (visual only) -->
+    <visual>
+      <origin xyz="${wheel_radius} 0 0" rpy="0 1.570795 0"/>
+      <geometry>
+        <box size="${wheel_width * 0.8} ${wheel_radius * 0.3} ${wheel_radius * 0.15}"/>
+      </geometry>
+      <material name="stripe_material_rr">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.570795 0 0"/>
       <geometry>
@@ -208,7 +248,7 @@
     <child link="front_left_steering_link"/>
     <axis xyz="0 0 1"/>
     <limit effort="${max_steering_effort}" lower="${-max_steering_angle}" upper="${max_steering_angle}" velocity="${max_steering_angular_velocity}"/>
-    <dynamics damping="0.1" friction="0.1"/>
+    <dynamics damping="0.01" friction="0.01"/>
   </joint>
 
   <!-- Front Left Wheel Joint (passive, Y-axis) -->
@@ -218,7 +258,7 @@
     <child link="front_left_wheel_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="${max_effort}" velocity="${max_wheel_angular_velocity}"/>
-    <dynamics damping="0.1" friction="0.1"/>
+    <dynamics damping="0.01" friction="0.01"/>
   </joint>
 
   <!-- Front Right Steering Joint (position controlled, Z-axis) -->
@@ -228,7 +268,7 @@
     <child link="front_right_steering_link"/>
     <axis xyz="0 0 1"/>
     <limit effort="${max_steering_effort}" lower="${-max_steering_angle}" upper="${max_steering_angle}" velocity="${max_steering_angular_velocity}"/>
-    <dynamics damping="0.1" friction="0.1"/>
+    <dynamics damping="0.01" friction="0.01"/>
   </joint>
 
   <!-- Front Right Wheel Joint (passive, Y-axis) -->
@@ -238,7 +278,7 @@
     <child link="front_right_wheel_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="${max_effort}" velocity="${max_wheel_angular_velocity}"/>
-    <dynamics damping="0.1" friction="0.1"/>
+    <dynamics damping="0.01" friction="0.01"/>
   </joint>
 
   <!-- Rear Left Wheel Joint (velocity controlled, Y-axis) -->
@@ -248,7 +288,7 @@
     <child link="rear_left_wheel_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="${max_effort}" velocity="${max_wheel_angular_velocity}"/>
-    <dynamics damping="0.1" friction="0.1"/>
+    <dynamics damping="0.01" friction="0.01"/>
   </joint>
 
   <!-- Rear Right Wheel Joint (velocity controlled, Y-axis) -->
@@ -258,7 +298,7 @@
     <child link="rear_right_wheel_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="${max_effort}" velocity="${max_wheel_angular_velocity}"/>
-    <dynamics damping="0.1" friction="0.1"/>
+    <dynamics damping="0.01" friction="0.01"/>
   </joint>
 
   <!-- ========== Gazebo Surface Friction ========== -->
@@ -346,10 +386,6 @@
       <parameters>$(find ackermann_control)/config/gz_ros2_control.yaml</parameters>
     </plugin>
 
-    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
-      <render_engine>ogre2</render_engine>
-    </plugin>
-
     <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
     </plugin>
 
@@ -373,7 +409,7 @@
       <lidar>
         <scan>
           <horizontal>
-            <samples>3600</samples>
+            <samples>3200</samples>
             <resolution>1</resolution>
             <min_angle>0.0</min_angle>
             <max_angle>6.28318</max_angle>
@@ -381,7 +417,7 @@
         </scan>
         <range>
           <min>0.15</min>
-          <max>16.0</max>
+          <max>18.0</max>
         </range>
       </lidar>
       <visualize>true</visualize>

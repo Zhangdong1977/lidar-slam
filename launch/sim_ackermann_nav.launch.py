@@ -1,7 +1,12 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
+from launch.actions import (
+    ExecuteProcess,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -10,14 +15,15 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     project_dir = '/home/pi/lidar-slam'
     world_file = os.path.join(project_dir, 'worlds', 'ackermann_test.sdf')
-    slam_params = os.path.join(project_dir, 'config', 'slam_toolbox_ackermann.yaml')
+    nav2_params = os.path.join(project_dir, 'config', 'nav2_params_ackermann.yaml')
+    map_file = os.path.join(project_dir, 'maps', 'ackermann_map.yaml')
 
     set_gz_resource_path = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH',
         os.path.join(project_dir, 'models'),
     )
 
-    # 1. Gazebo Harmonic with world (no robot in world file)
+    # 1. Gazebo Harmonic with world
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             FindPackageShare('ros_gz_sim'), '/launch/gz_sim.launch.py'
@@ -28,7 +34,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 2. ros_gz_bridge: sensors only (no /cmd_vel)
+    # 2. ros_gz_bridge: sensors only
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -52,18 +58,7 @@ def generate_launch_description():
         ]),
     )
 
-    # 4. slam_toolbox online_async
-    slam_toolbox = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            FindPackageShare('slam_toolbox'), '/launch/online_async_launch.py'
-        ]),
-        launch_arguments={
-            'slam_params_file': slam_params,
-            'use_sim_time': 'true',
-        }.items(),
-    )
-
-    # 5. Static TF: body_link → laser frame (Gazebo uses scoped name as frame_id)
+    # 4. Static TF: body_link → laser frame
     laser_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -76,7 +71,33 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
-    # 6. RViz2
+    # 5. Nav2 bringup (map_server + AMCL + navigation stack)
+    nav2_bringup = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            FindPackageShare('nav2_bringup'), '/launch/bringup_launch.py'
+        ]),
+        launch_arguments={
+            'slam': 'False',
+            'map': map_file,
+            'use_sim_time': 'True',
+            'params_file': nav2_params,
+            'autostart': 'True',
+            'use_composition': 'False',
+            'use_respawn': 'False',
+        }.items(),
+    )
+
+    # 6. cmd_vel_bridge: Nav2 Twist → Ackermann steering_angle/velocity
+    cmd_vel_bridge = ExecuteProcess(
+        cmd=[
+            'python3',
+            os.path.join(project_dir, 'scripts', 'cmd_vel_bridge.py'),
+            '--ros-args', '-p', 'use_sim_time:=true',
+        ],
+        output='screen',
+    )
+
+    # 7. RViz2
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
@@ -94,7 +115,12 @@ def generate_launch_description():
             period=2.0,
             actions=[ackermann_control],
         ),
-        slam_toolbox,
         laser_tf,
+        # Delay Nav2 until robot is spawned and controllers are active
+        TimerAction(
+            period=15.0,
+            actions=[nav2_bringup],
+        ),
+        cmd_vel_bridge,
         rviz2,
     ])

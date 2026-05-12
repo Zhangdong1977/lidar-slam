@@ -64,7 +64,7 @@ def main():
     rclpy.init()
     node = rclpy.create_node('ackermann_teleop')
 
-    speed = node.declare_parameter('speed', 0.5).value
+    speed = node.declare_parameter('speed', 1.0).value
     steer = node.declare_parameter('steer', 0.3).value
 
     pub_steer = node.create_publisher(Float64, '/steering_angle', 10)

@@ -16,6 +16,9 @@ def generate_launch_description():
         FindExecutable(name='xacro'), ' ', xacro_file
     ])
 
+    controller_yaml = PathJoinSubstitution([pkg_share, 'config', 'gz_ros2_control.yaml'])
+    params_yaml = PathJoinSubstitution([pkg_share, 'config', 'ackermann_params.yaml'])
+
     # 1. robot_state_publisher
     robot_state_publisher = Node(
         package='robot_state_publisher',
@@ -28,54 +31,36 @@ def generate_launch_description():
         output='screen',
     )
 
-    # 2. ros2_control node (controller_manager)
-    controller_manager = Node(
-        package='controller_manager',
-        executable='ros2_control_node',
-        parameters=[
-            PathJoinSubstitution([pkg_share, 'config', 'gz_ros2_control.yaml']),
-            {'use_sim_time': True},
-        ],
-        output='screen',
-    )
-
-    # 3. Spawn robot in Gazebo (one-shot, delayed until Gazebo is ready)
+    # 2. Spawn robot in Gazebo (includes internal controller_manager via gz_ros2_control-system plugin)
     spawn_robot = ExecuteProcess(
         cmd=['ros2', 'run', 'ros_gz_sim', 'create',
              '-name', 'ackermann_robot',
              '-topic', 'robot_description',
-             '-x', '0', '-y', '0', '-z', '0.17'],
+             '-x', '0', '-y', '0', '-z', '0.24'],
         output='screen',
     )
 
-    # 4. Load and activate controllers (one-shot commands)
-    load_joint_state_broadcaster = ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
-             'joint_state_broadcaster'],
+    # 3. Load controllers into Gazebo-internal controller_manager (delayed)
+    load_controllers = ExecuteProcess(
+        cmd=['python3', os.path.join('/home/pi/lidar-slam', 'scripts', 'load_controllers.py')],
         output='screen',
     )
 
-    load_position_controller = ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
-             'forward_position_controller'],
-        output='screen',
-    )
-
-    load_velocity_controller = ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
-             'forward_velocity_controller'],
+    # 4. VehicleController: bridges /steering_angle + /velocity → forward command controllers
+    vehicle_controller = Node(
+        package='ackermann_control',
+        executable='vehicle_controller',
+        name='vehicle_controller',
+        parameters=[params_yaml],
         output='screen',
     )
 
     return LaunchDescription([
         robot_state_publisher,
-        controller_manager,
-        # Spawn robot after Gazebo + ros2_control are up (5s delay)
+        # Spawn robot after Gazebo + robot_state_publisher are up (5s delay)
         TimerAction(period=5.0, actions=[spawn_robot]),
-        # Load controllers after spawn (6s delay)
-        TimerAction(period=6.0, actions=[
-            load_joint_state_broadcaster,
-            load_position_controller,
-            load_velocity_controller,
-        ]),
+        # Load controllers after spawn + Gazebo controller_manager init (10s delay)
+        TimerAction(period=10.0, actions=[load_controllers]),
+        # Start VehicleController after controllers are activated (12s delay)
+        TimerAction(period=12.0, actions=[vehicle_controller]),
     ])

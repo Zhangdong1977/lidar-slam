@@ -4,8 +4,11 @@
 
 set -e
 
+# 项目根目录: 优先使用环境变量，否则从脚本位置自动探测
+: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+
 MAP_NAME="${1:-real_map}"
-MAP_DIR="/home/pi/Desktop/code/lidar-slam/maps"
+MAP_DIR="$LIDAR_SLAM_ROOT/maps"
 mkdir -p "$MAP_DIR"
 
 source /opt/ros/jazzy/setup.bash
