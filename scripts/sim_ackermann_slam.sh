@@ -14,7 +14,10 @@ for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthorit
 done
 
 # ROS2 环境
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
-source /home/pi/lidar-slam/install/setup.bash
+LIDAR_SLAM_ROOT="${LIDAR_SLAM_ROOT:-/home/hello/lidar-slam}"
+source "${LIDAR_SLAM_ROOT}/install/setup.bash"
 
-exec ros2 launch /home/pi/lidar-slam/launch/sim_ackermann.launch.py
+exec ros2 launch "${LIDAR_SLAM_ROOT}/launch/sim_ackermann.launch.py"

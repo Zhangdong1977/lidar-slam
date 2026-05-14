@@ -31,6 +31,8 @@ for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthorit
 done
 
 # ROS2 环境
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 source "$LIDAR_SLAM_ROOT/third-party/rplidar_ws/install/setup.bash"
 

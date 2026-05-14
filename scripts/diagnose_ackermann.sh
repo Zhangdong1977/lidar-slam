@@ -2,8 +2,11 @@
 # Ackermann 仿真诊断脚本 - 检查完整数据链路
 # 用法: 启动仿真后，在另一个终端运行 ./scripts/diagnose_ackermann.sh
 
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
-source /home/pi/lidar-slam/install/setup.bash
+LIDAR_SLAM_ROOT="${LIDAR_SLAM_ROOT:-/home/hello/lidar-slam}"
+source "${LIDAR_SLAM_ROOT}/install/setup.bash"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

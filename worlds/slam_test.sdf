@@ -257,7 +257,7 @@
 
     <!-- ========== Robot ========== -->
     <include>
-      <uri>file:///home/pi/lidar-slam/models/sim_robot</uri>
+      <uri>file:///home/hello/lidar-slam/models/sim_robot</uri>
       <name>sim_robot</name>
       <pose>0 0 0.075 0 0 0</pose>
     </include>

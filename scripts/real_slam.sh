@@ -21,6 +21,8 @@ echo "[INFO] LIDAR_SLAM_ROOT=$LIDAR_SLAM_ROOT"
 export ROS_DOMAIN_ID
 echo "[INFO] ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 source "$LIDAR_SLAM_ROOT/third-party/rplidar_ws/install/setup.bash"
 

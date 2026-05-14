@@ -10,7 +10,7 @@ from launch.substitutions import Command, FindExecutable, PathJoinSubstitution
 def generate_launch_description():
     pkg_share = FindPackageShare('ackermann_control')
     xacro_file = os.path.join(
-        '/home/pi/lidar-slam', 'models', 'ackermann', 'ackermann.xacro')
+        os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam'), 'models', 'ackermann', 'ackermann.xacro')
 
     robot_description_content = Command([
         FindExecutable(name='xacro'), ' ', xacro_file
@@ -42,7 +42,7 @@ def generate_launch_description():
 
     # 3. Load controllers into Gazebo-internal controller_manager (delayed)
     load_controllers = ExecuteProcess(
-        cmd=['python3', os.path.join('/home/pi/lidar-slam', 'scripts', 'load_controllers.py')],
+        cmd=['python3', os.path.join(os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam'), 'scripts', 'load_controllers.py')],
         output='screen',
     )
 

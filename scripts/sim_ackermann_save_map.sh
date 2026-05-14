@@ -5,8 +5,11 @@
 set -e
 
 MAP_NAME="${1:-ackermann_map}"
-MAP_DIR="/home/pi/lidar-slam/maps"
+LIDAR_SLAM_ROOT="${LIDAR_SLAM_ROOT:-/home/hello/lidar-slam}"
+MAP_DIR="${LIDAR_SLAM_ROOT}/maps"
 
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 
 echo "Saving map to ${MAP_DIR}/${MAP_NAME} ..."

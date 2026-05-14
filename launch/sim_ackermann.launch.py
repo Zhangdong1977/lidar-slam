@@ -8,7 +8,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    project_dir = '/home/pi/lidar-slam'
+    project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
     world_file = os.path.join(project_dir, 'worlds', 'ackermann_test.sdf')
     slam_params = os.path.join(project_dir, 'config', 'slam_toolbox_ackermann.yaml')
 

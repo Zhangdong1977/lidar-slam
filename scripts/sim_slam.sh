@@ -19,6 +19,8 @@ export LIDAR_SLAM_ROOT
 echo "[INFO] LIDAR_SLAM_ROOT=$LIDAR_SLAM_ROOT"
 
 # ROS2 环境
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 
 LAUNCH_FILE="$LIDAR_SLAM_ROOT/launch/sim_slam.launch.py"

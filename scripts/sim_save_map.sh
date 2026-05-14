@@ -10,6 +10,8 @@ set -e
 MAP_NAME="${1:-sim_test_map}"
 MAP_DIR="$LIDAR_SLAM_ROOT/maps"
 
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 
 echo "Saving map to ${MAP_DIR}/${MAP_NAME} ..."

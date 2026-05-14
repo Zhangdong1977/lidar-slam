@@ -10,7 +10,7 @@ from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
-    project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/pi/lidar-slam')
+    project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
     slam_params = os.path.join(project_dir, 'config', 'slam_toolbox_real.yaml')
     rviz_config = os.path.join(project_dir, 'config', 'slam.rviz')
 

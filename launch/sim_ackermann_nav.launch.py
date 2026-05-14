@@ -4,19 +4,25 @@ from launch import LaunchDescription
 from launch.actions import (
     ExecuteProcess,
     IncludeLaunchDescription,
+    RegisterEventHandler,
     SetEnvironmentVariable,
     TimerAction,
 )
+from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    project_dir = '/home/pi/lidar-slam'
+    project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
     world_file = os.path.join(project_dir, 'worlds', 'ackermann_test.sdf')
     nav2_params = os.path.join(project_dir, 'config', 'nav2_params_ackermann.yaml')
     map_file = os.path.join(project_dir, 'maps', 'ackermann_map.yaml')
+    rviz_config = os.path.join(project_dir, 'config', 'nav.rviz')
+    ekf_config = os.path.join(project_dir, 'config', 'ekf.yaml')
 
     set_gz_resource_path = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH',
@@ -71,39 +77,62 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
-    # 5. Nav2 bringup (map_server + AMCL + navigation stack)
-    nav2_bringup = IncludeLaunchDescription(
+    # 5. EKF: fuse /odom + /imu → publish odom→body_link TF
+    ekf = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_config, {'use_sim_time': True}],
+    )
+
+    # 6a. Nav2 localization only (map_server + AMCL)
+    localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            FindPackageShare('nav2_bringup'), '/launch/bringup_launch.py'
+            FindPackageShare('nav2_bringup'), '/launch/localization_launch.py'
         ]),
         launch_arguments={
-            'slam': 'False',
             'map': map_file,
             'use_sim_time': 'True',
-            'params_file': nav2_params,
             'autostart': 'True',
+            'params_file': nav2_params,
             'use_composition': 'False',
             'use_respawn': 'False',
         }.items(),
     )
 
-    # 6. cmd_vel_bridge: Nav2 Twist → Ackermann steering_angle/velocity
+    # 5b. Nav2 navigation (planner, controller, etc.) — launched after localization settles
+    navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            FindPackageShare('nav2_bringup'), '/launch/navigation_launch.py'
+        ]),
+        launch_arguments={
+            'use_sim_time': 'True',
+            'autostart': 'True',
+            'params_file': nav2_params,
+            'use_composition': 'False',
+            'use_respawn': 'False',
+        }.items(),
+    )
+
+    # 7. cmd_vel_bridge: Nav2 Twist → Ackermann steering_angle/velocity
     cmd_vel_bridge = ExecuteProcess(
         cmd=[
-            'python3',
+            '/home/hello/miniconda3/envs/lidar_slam/bin/python3',
             os.path.join(project_dir, 'scripts', 'cmd_vel_bridge.py'),
             '--ros-args', '-p', 'use_sim_time:=true',
         ],
         output='screen',
     )
 
-    # 7. RViz2
+    # 8. RViz2
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
         output='screen',
         parameters=[{'use_sim_time': True}],
+        arguments=['-d', rviz_config],
     )
 
     return LaunchDescription([
@@ -116,10 +145,20 @@ def generate_launch_description():
             actions=[ackermann_control],
         ),
         laser_tf,
-        # Delay Nav2 until robot is spawned and controllers are active
+        # EKF starts after bridge delivers /odom and /imu
+        TimerAction(
+            period=5.0,
+            actions=[ekf],
+        ),
+        # Localization first: give it enough time to load map and publish map→odom TF
         TimerAction(
             period=15.0,
-            actions=[nav2_bringup],
+            actions=[localization],
+        ),
+        # Navigation after localization has time to activate map_server + AMCL
+        TimerAction(
+            period=25.0,
+            actions=[navigation],
         ),
         cmd_vel_bridge,
         rviz2,

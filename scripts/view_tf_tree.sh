@@ -15,6 +15,8 @@ for auth in /run/user/$(id -u)/.mutter-Xwaylandauth.* /home/$(whoami)/.Xauthorit
 done
 
 
+eval "$(conda shell.bash hook)"
+conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 
 ros2 run rqt_tf_tree rqt_tf_tree
