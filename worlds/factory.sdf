@@ -1,0 +1,2207 @@
+<sdf version='1.10'>
+  <world name='factory'>
+    <physics name='1ms' type='ignored'>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+    <plugin name='gz::sim::systems::Physics' filename='gz-sim-physics-system'/>
+    <plugin name='gz::sim::systems::UserCommands' filename='gz-sim-user-commands-system'/>
+    <plugin name='gz::sim::systems::SceneBroadcaster' filename='gz-sim-scene-broadcaster-system'/>
+    <plugin name='gz::sim::systems::Sensors' filename='gz-sim-sensors-system'>
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin name='gz::sim::systems::Contact' filename='gz-sim-contact-system'/>
+    <gravity>0 0 -9.8000000000000007</gravity>
+    <magnetic_field>5.5644999999999998e-06 2.2875799999999999e-05 -4.2388400000000002e-05</magnetic_field>
+    <atmosphere type='adiabatic'/>
+    <scene>
+      <ambient>0.400000006 0.400000006 0.400000006 1</ambient>
+      <background>0.699999988 0.699999988 0.699999988 1</background>
+      <shadows>true</shadows>
+    </scene>
+    <model name='ground_plane'>
+      <static>true</static>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.800000012 0.800000012 0.800000012 1</ambient>
+            <diffuse>0.800000012 0.800000012 0.800000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <pose>0 0 0 0 0 0</pose>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='factory_floor'>
+      <static>true</static>
+      <pose>0 0 -0.0099999997764825821 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>100 100 0.02</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>100 100 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.300000012 0.300000012 0.300000012 1</ambient>
+            <diffuse>0.300000012 0.300000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='wall_north'>
+      <static>true</static>
+      <pose>0 50 0.59999999999999998 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>100.5 0.25 1.2</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>100.5 0.25 1.2</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='wall_south'>
+      <static>true</static>
+      <pose>0 -50 0.59999999999999998 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>100.5 0.25 1.2</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>100.5 0.25 1.2</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='wall_east'>
+      <static>true</static>
+      <pose>50 0 0.59999999999999998 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>0.25 100.5 1.2</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>0.25 100.5 1.2</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='wall_west'>
+      <static>true</static>
+      <pose>-50 0 0.59999999999999998 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>0.25 100.5 1.2</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>0.25 100.5 1.2</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_perimeter_north'>
+      <static>true</static>
+      <pose>0 48.375 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>99.75 3 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>99.75 3 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_perimeter_south'>
+      <static>true</static>
+      <pose>0 -48.375 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>99.75 3 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>99.75 3 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_perimeter_east'>
+      <static>true</static>
+      <pose>48.375 0 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_perimeter_west'>
+      <static>true</static>
+      <pose>-48.375 0 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_vertical_1'>
+      <static>true</static>
+      <pose>-15 0 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_vertical_2'>
+      <static>true</static>
+      <pose>15 0 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>3 93.75 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='road_horizontal'>
+      <static>true</static>
+      <pose>0 0 0.0050000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>93.75 3 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>93.75 3 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.899999976 0.850000024 0 1</ambient>
+            <diffuse>0.899999976 0.850000024 0 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_1'>
+      <static>true</static>
+      <pose>-40 35 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_2'>
+      <static>true</static>
+      <pose>-30 35 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_3'>
+      <static>true</static>
+      <pose>-20 35 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_4'>
+      <static>true</static>
+      <pose>-40 18 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_5'>
+      <static>true</static>
+      <pose>-30 18 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_6'>
+      <static>true</static>
+      <pose>-20 18 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_1'>
+      <static>true</static>
+      <pose>-40 -15 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_2'>
+      <static>true</static>
+      <pose>-30 -15 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_3'>
+      <static>true</static>
+      <pose>-20 -15 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_4'>
+      <static>true</static>
+      <pose>-32.369998931884766 -27.844400405883789 0 0 0 1.5708000357176291</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_5'>
+      <static>true</static>
+      <pose>30.333477020263672 -25.829729080200195 0 0 0 1.5708000357176291</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_6'>
+      <static>true</static>
+      <pose>-0.17277525365352631 -25.512533187866211 0 0 0 1.5708000357176291</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_sw_1'>
+      <static>true</static>
+      <pose>-25 -5 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_sw_2'>
+      <static>true</static>
+      <pose>-35 -5 0 0 0 0.49999999999999989</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_1'>
+      <static>true</static>
+      <pose>-8 35 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_2'>
+      <static>true</static>
+      <pose>8 35 0 0 0 -3.1415853071795867</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_3'>
+      <static>true</static>
+      <pose>-8 18 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_4'>
+      <static>true</static>
+      <pose>8 18 0 0 0 -3.1415853071795867</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cw_1'>
+      <static>true</static>
+      <pose>-5 25 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cw_2'>
+      <static>true</static>
+      <pose>5 25 0 0 0 0.80000000000000049</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_cw_1'>
+      <static>true</static>
+      <pose>-10 10 0 0 0 -1.5629999999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_cw_2'>
+      <static>true</static>
+      <pose>10 10 0 0 0 0.49999999999999989</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_1'>
+      <static>true</static>
+      <pose>-8 -15 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_2'>
+      <static>true</static>
+      <pose>8 -15 0 0 0 -3.1415853071795867</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_3'>
+      <static>true</static>
+      <pose>-8 -32 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_4'>
+      <static>true</static>
+      <pose>8 -32 0 0 0 -3.1415853071795867</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cc_1'>
+      <static>true</static>
+      <pose>0 -14.841058731079102 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cc_2'>
+      <static>true</static>
+      <pose>-5 -40 0 0 0 0.49999999999999989</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cc_3'>
+      <static>true</static>
+      <pose>5 -40 0 0 0 1</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_cc_1'>
+      <static>true</static>
+      <pose>-10 -8 0 0 0 -1</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charging_floor'>
+      <static>true</static>
+      <pose>42 42 0.0060000000000000001 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>8 8 0.01</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>8 8 0.01</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.699999988 0.200000003 1</ambient>
+            <diffuse>0.100000001 0.699999988 0.200000003 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charger_1'>
+      <static>true</static>
+      <pose>38 38 0 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.5 0.150000006 1</ambient>
+            <diffuse>0.100000001 0.5 0.150000006 1</diffuse>
+          </material>
+        </visual>
+        <collision name='collision_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.200000003 0.800000012 0.300000012 1</ambient>
+            <diffuse>0.200000003 0.800000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charger_2'>
+      <static>true</static>
+      <pose>41 38 0 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.5 0.150000006 1</ambient>
+            <diffuse>0.100000001 0.5 0.150000006 1</diffuse>
+          </material>
+        </visual>
+        <collision name='collision_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.200000003 0.800000012 0.300000012 1</ambient>
+            <diffuse>0.200000003 0.800000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charger_3'>
+      <static>true</static>
+      <pose>44 38 0 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.5 0.150000006 1</ambient>
+            <diffuse>0.100000001 0.5 0.150000006 1</diffuse>
+          </material>
+        </visual>
+        <collision name='collision_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.200000003 0.800000012 0.300000012 1</ambient>
+            <diffuse>0.200000003 0.800000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charger_4'>
+      <static>true</static>
+      <pose>38 44 0 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.5 0.150000006 1</ambient>
+            <diffuse>0.100000001 0.5 0.150000006 1</diffuse>
+          </material>
+        </visual>
+        <collision name='collision_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.200000003 0.800000012 0.300000012 1</ambient>
+            <diffuse>0.200000003 0.800000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charger_5'>
+      <static>true</static>
+      <pose>41 44 0 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.5 0.150000006 1</ambient>
+            <diffuse>0.100000001 0.5 0.150000006 1</diffuse>
+          </material>
+        </visual>
+        <collision name='collision_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.200000003 0.800000012 0.300000012 1</ambient>
+            <diffuse>0.200000003 0.800000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='charger_6'>
+      <static>true</static>
+      <pose>44 44 0 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_base'>
+          <pose>0 0 0.025000000000000001 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>1.5 0.80000000000000004 0.050000000000000003</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.100000001 0.5 0.150000006 1</ambient>
+            <diffuse>0.100000001 0.5 0.150000006 1</diffuse>
+          </material>
+        </visual>
+        <collision name='collision_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual_post'>
+          <pose>0.59999999999999998 0 0.55000000000000004 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.25 0.25 1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.200000003 0.800000012 0.300000012 1</ambient>
+            <diffuse>0.200000003 0.800000012 0.300000012 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_qc_1'>
+      <static>true</static>
+      <pose>22 35 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_qc_2'>
+      <static>true</static>
+      <pose>22 20 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_qc_1'>
+      <static>true</static>
+      <pose>25 28 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_qc_1'>
+      <static>true</static>
+      <pose>20 28 0 0 0 0.30000000000000043</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_se_1'>
+      <static>true</static>
+      <pose>25 -20 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_se_2'>
+      <static>true</static>
+      <pose>35 -20 0 0 0 1.5708000000000011</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_se_1'>
+      <static>true</static>
+      <pose>20 -8 0 0 0 -1</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_se_2'>
+      <static>true</static>
+      <pose>30 -8 0 0 0 0.30000000000000043</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_se_3'>
+      <static>true</static>
+      <pose>40 -8 0 0 0 0.80000000000000049</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_se_1'>
+      <static>true</static>
+      <pose>25 -35 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_se_2'>
+      <static>true</static>
+      <pose>35 -35 0 0 0 0.49999999999999989</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_se_1'>
+      <static>true</static>
+      <pose>40 -15 0 0 0 0.80000000000000049</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_7'>
+      <static>true</static>
+      <pose>-40 43 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_8'>
+      <static>true</static>
+      <pose>-30 43 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_9'>
+      <static>true</static>
+      <pose>-20 43 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_10'>
+      <static>true</static>
+      <pose>-0.46185150742530823 28.42303466796875 0 0 0 3.1300599998339043</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_nw_11'>
+      <static>true</static>
+      <pose>-30 8 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_nw_1'>
+      <static>true</static>
+      <pose>-45 26 0 0 0 0.49999999999999994</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_nw_2'>
+      <static>true</static>
+      <pose>-25 26 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_nw_1'>
+      <static>true</static>
+      <pose>-45 45 0 0 0 0.30000000000000021</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_nw_2'>
+      <static>true</static>
+      <pose>-18.961811065673828 6.9053664207458496 0.060918301343917847 0 0 0.79999999566814339</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_nw_1'>
+      <static>true</static>
+      <pose>-18.73919677734375 12.550580978393555 0 0 0 -1.0000000304907348</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='lamp_nw_1'>
+      <static>true</static>
+      <pose>-30 26 5 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_5'>
+      <static>true</static>
+      <pose>-8 43 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_6'>
+      <static>true</static>
+      <pose>8 43 0 0 0 -3.1415899999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_7'>
+      <static>true</static>
+      <pose>-8 8 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cw_8'>
+      <static>true</static>
+      <pose>8 8 0 0 0 -3.1415899999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_cw_1'>
+      <static>true</static>
+      <pose>12 30 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_cw_2'>
+      <static>true</static>
+      <pose>-12 45 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cw_3'>
+      <static>true</static>
+      <pose>0 45 0 0 0 0.49999999999999994</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='lamp_cw_1'>
+      <static>true</static>
+      <pose>0 26 5 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_qc_3'>
+      <static>true</static>
+      <pose>30 35 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_qc_4'>
+      <static>true</static>
+      <pose>40 35 0 0 0 -3.1415899999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_qc_5'>
+      <static>true</static>
+      <pose>30 10 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_qc_2'>
+      <static>true</static>
+      <pose>45 28 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_qc_3'>
+      <static>true</static>
+      <pose>19.210348129272461 15 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_qc_1'>
+      <static>true</static>
+      <pose>25 10 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_qc_2'>
+      <static>true</static>
+      <pose>35 10 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_qc_2'>
+      <static>true</static>
+      <pose>30 15 0 0 0 0.80000000000000049</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_qc_1'>
+      <static>true</static>
+      <pose>17 5 0 0 0 0.39999999999999997</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='lamp_ne_1'>
+      <static>true</static>
+      <pose>30 26 5 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_7'>
+      <static>true</static>
+      <pose>-40 -35 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_8'>
+      <static>true</static>
+      <pose>-30 -35 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_9'>
+      <static>true</static>
+      <pose>-20 -35 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_sw_11'>
+      <static>true</static>
+      <pose>-30 -45 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfF_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_sw_3'>
+      <static>true</static>
+      <pose>-25 -40 0 0 0 0.80000000000000049</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_sw_4'>
+      <static>true</static>
+      <pose>-45 -30 0 0 0 -0.49999999999999994</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_sw_1'>
+      <static>true</static>
+      <pose>-45 -45 0 0 0 0.30000000000000021</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_sw_2'>
+      <static>true</static>
+      <pose>-18.771976470947266 -4.0319647789001465 0 0 0 -0.50000000950332757</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_sw_1'>
+      <static>true</static>
+      <pose>-45 -8 0 0 0 0.99999999999999978</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='lamp_sw_1'>
+      <static>true</static>
+      <pose>-30 -26 5 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_5'>
+      <static>true</static>
+      <pose>-8 -42 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_6'>
+      <static>true</static>
+      <pose>8 -42 0 0 0 -3.1415899999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_7'>
+      <static>true</static>
+      <pose>-8 -8 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_cc_8'>
+      <static>true</static>
+      <pose>8 -8 0 0 0 -3.1415899999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_cc_1'>
+      <static>true</static>
+      <pose>0 -20 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_cc_2'>
+      <static>true</static>
+      <pose>-12 -35 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_cc_4'>
+      <static>true</static>
+      <pose>-12 -45 0 0 0 0.30000000000000021</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_cc_2'>
+      <static>true</static>
+      <pose>12 -45 0 0 0 -0.80000000000000049</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='lamp_cc_1'>
+      <static>true</static>
+      <pose>0 -26 5 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_se_3'>
+      <static>true</static>
+      <pose>45 -35 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfE_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='shelf_se_4'>
+      <static>true</static>
+      <pose>25 -35 0 0 0 1.5708000000000006</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ShelfD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_se_1'>
+      <static>true</static>
+      <pose>20 -30 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='desk_se_2'>
+      <static>true</static>
+      <pose>30 -30 0 0 0 -3.1415899999999999</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_DeskC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_se_2'>
+      <static>true</static>
+      <pose>45 -20 0 0 0 0.49999999999999994</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='pallet_se_3'>
+      <static>true</static>
+      <pose>45 -45 0 0 0 -0.30000000000000021</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_PalletJackB_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_se_3'>
+      <static>true</static>
+      <pose>35 -45 0 0 0 0.59999999999999998</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringA_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='clutter_se_4'>
+      <static>true</static>
+      <pose>20 -15 0 0 0 0.20000000000000009</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_ClutteringD_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='trash_se_1'>
+      <static>true</static>
+      <pose>18.107336044311523 -10 0 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_TrashCanC_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='bucket_se_4'>
+      <static>true</static>
+      <pose>25 -45 0 0 0 0.39999999999999997</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Bucket_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='lamp_se_1'>
+      <static>true</static>
+      <pose>30 -26 5 0 0 0</pose>
+      <include>
+        <uri>model://aws_robomaker_warehouse_Lamp_01</uri>
+      </include>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='partition_nw_1'>
+      <static>true</static>
+      <pose>-17 26 0.29999999999999999 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>0.14999999999999999 8 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>0.14999999999999999 8 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.600000024 0.600000024 0.600000024 1</ambient>
+            <diffuse>0.600000024 0.600000024 0.600000024 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='partition_cw_1'>
+      <static>true</static>
+      <pose>0 14 0.29999999999999999 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>10 0.14999999999999999 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>10 0.14999999999999999 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.649999976 0.649999976 0.600000024 1</ambient>
+            <diffuse>0.649999976 0.649999976 0.600000024 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='partition_cc_1'>
+      <static>true</static>
+      <pose>0 -12 0.29999999999999999 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>10 0.14999999999999999 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>10 0.14999999999999999 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.649999976 0.649999976 0.600000024 1</ambient>
+            <diffuse>0.649999976 0.649999976 0.600000024 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <model name='partition_se_1'>
+      <static>true</static>
+      <pose>17 -26 0.29999999999999999 0 0 0</pose>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <box>
+              <size>0.14999999999999999 8 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode/>
+            </friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <box>
+              <size>0.14999999999999999 8 0.59999999999999998</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.600000024 0.600000024 0.600000024 1</ambient>
+            <diffuse>0.600000024 0.600000024 0.600000024 1</diffuse>
+          </material>
+        </visual>
+        <pose>0 0 0 0 0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <self_collide>false</self_collide>
+    </model>
+    <light name='sun' type='directional'>
+      <pose>0 0 10 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>-0.5 0.10000000000000001 -0.90000000000000002</direction>
+      <diffuse>0.800000012 0.800000012 0.800000012 1</diffuse>
+      <specular>0.200000003 0.200000003 0.200000003 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <linear>0.01</linear>
+        <constant>0.90000000000000002</constant>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+    <light name='light_nw' type='point'>
+      <pose>-25 25 8 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>0 0 -1</direction>
+      <diffuse>0.5 0.5 0.5 1</diffuse>
+      <specular>0.200000003 0.200000003 0.200000003 1</specular>
+      <attenuation>
+        <range>80</range>
+        <linear>0.01</linear>
+        <constant>0.29999999999999999</constant>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+    <light name='light_ne' type='point'>
+      <pose>25 25 8 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>0 0 -1</direction>
+      <diffuse>0.5 0.5 0.5 1</diffuse>
+      <specular>0.200000003 0.200000003 0.200000003 1</specular>
+      <attenuation>
+        <range>80</range>
+        <linear>0.01</linear>
+        <constant>0.29999999999999999</constant>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+    <light name='light_sw' type='point'>
+      <pose>-25 -25 8 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>0 0 -1</direction>
+      <diffuse>0.5 0.5 0.5 1</diffuse>
+      <specular>0.200000003 0.200000003 0.200000003 1</specular>
+      <attenuation>
+        <range>80</range>
+        <linear>0.01</linear>
+        <constant>0.29999999999999999</constant>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+    <light name='light_se' type='point'>
+      <pose>25 -25 8 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>0 0 -1</direction>
+      <diffuse>0.5 0.5 0.5 1</diffuse>
+      <specular>0.200000003 0.200000003 0.200000003 1</specular>
+      <attenuation>
+        <range>80</range>
+        <linear>0.01</linear>
+        <constant>0.29999999999999999</constant>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+  </world>
+</sdf>

@@ -18,7 +18,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
-    world_file = os.path.join(project_dir, 'worlds', 'ackermann_test.sdf')
+    world_file = os.path.join(project_dir, 'worlds', 'factory.sdf')
     nav2_params = os.path.join(project_dir, 'config', 'nav2_params_ackermann.yaml')
     map_file = os.path.join(project_dir, 'maps', 'ackermann_map.yaml')
     rviz_config = os.path.join(project_dir, 'config', 'nav.rviz')

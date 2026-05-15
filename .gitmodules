@@ -4,3 +4,6 @@
 [submodule "third-party/rplidar_sdk"]
 	path = third-party/rplidar_sdk
 	url = https://github.com/slamtec/rplidar_sdk.git
+[submodule "third-party/aws-robomaker-small-warehouse-world"]
+	path = third-party/aws-robomaker-small-warehouse-world
+	url = https://github.com/aws-robotics/aws-robomaker-small-warehouse-world.git

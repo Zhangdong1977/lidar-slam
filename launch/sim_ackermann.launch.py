@@ -9,12 +9,14 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
-    world_file = os.path.join(project_dir, 'worlds', 'ackermann_test.sdf')
+    world_file = os.path.join(project_dir, 'worlds', 'factory.sdf')
     slam_params = os.path.join(project_dir, 'config', 'slam_toolbox_ackermann.yaml')
+    rviz_config = os.path.join(project_dir, 'config', 'slam.rviz')
+    ekf_config = os.path.join(project_dir, 'config', 'ekf.yaml')
 
     set_gz_resource_path = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH',
-        os.path.join(project_dir, 'models'),
+        os.path.join(project_dir, 'models') + ':' + os.path.join(project_dir, 'third-party', 'aws-robomaker-small-warehouse-world', 'models'),
     )
 
     # 1. Gazebo Harmonic with world (no robot in world file)
@@ -36,12 +38,9 @@ def generate_launch_description():
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             '/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
-            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
         ],
-        parameters=[{
-            'qos_overrides./tf.publisher.durability': 'transient_local',
-        }],
+        parameters=[{}],
         output='screen',
     )
 
@@ -52,7 +51,16 @@ def generate_launch_description():
         ]),
     )
 
-    # 4. slam_toolbox online_async
+    # 4. EKF: fuse /odom + /imu → publish odom→body_link TF
+    ekf = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_config, {'use_sim_time': True}],
+    )
+
+    # 5. slam_toolbox online_async
     slam_toolbox = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             FindPackageShare('slam_toolbox'), '/launch/online_async_launch.py'
@@ -63,7 +71,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 5. Static TF: body_link → laser frame (Gazebo uses scoped name as frame_id)
+    # 6. Static TF: body_link → laser frame (Gazebo uses scoped name as frame_id)
     laser_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -76,13 +84,14 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
-    # 6. RViz2
+    # 7. RViz2
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
         output='screen',
         parameters=[{'use_sim_time': True}],
+        arguments=['-d', rviz_config],
     )
 
     return LaunchDescription([
@@ -94,7 +103,16 @@ def generate_launch_description():
             period=2.0,
             actions=[ackermann_control],
         ),
-        slam_toolbox,
+        # EKF starts after bridge delivers /odom and /imu
+        TimerAction(
+            period=5.0,
+            actions=[ekf],
+        ),
+        # slam_toolbox starts after robot is spawned and TF/scan are flowing
+        TimerAction(
+            period=5.0,
+            actions=[slam_toolbox],
+        ),
         laser_tf,
         rviz2,
     ])

@@ -17,6 +17,15 @@
     </plugin>
     <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
 
+    <!-- GUI: Grid3D covers 100x100m factory -->
+    <gui>
+      <plugin filename="Grid3D" name="Grid3D">
+        <cell_count>100</cell_count>
+        <cell_size>1</cell_size>
+        <vertical_cell_count>0</vertical_cell_count>
+      </plugin>
+    </gui>
+
     <!-- Sun -->
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
