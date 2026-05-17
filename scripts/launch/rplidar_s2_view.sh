@@ -19,7 +19,7 @@ if [ ! -w "$SERIAL_PORT" ]; then
 fi
 
 # 项目根目录: 优先使用环境变量，否则从脚本位置自动探测
-: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
 
 # GUI 程序需要
 export DISPLAY=:0

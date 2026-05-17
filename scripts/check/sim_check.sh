@@ -3,7 +3,7 @@
 # 用法: ./scripts/sim_check.sh
 
 # 项目根目录: 优先使用环境变量，否则从脚本位置自动探测
-: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+: "${LIDAR_SLAM_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
 
 eval "$(conda shell.bash hook)"
 conda activate lidar_slam

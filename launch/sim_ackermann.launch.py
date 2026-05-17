@@ -35,13 +35,21 @@ def generate_launch_description():
         package='ros_gz_bridge',
         executable='parameter_bridge',
         arguments=[
-            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/scan_raw@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             '/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
         ],
         parameters=[{}],
         output='screen',
+    )
+
+    # 2b. scan_range_filter: replace inf/NaN → valid range so Karto traces free space
+    scan_filter = Node(
+        package='lidar_slam_nodes',
+        executable='scan_range_filter',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
     )
 
     # 3. ackermann_control (robot_state_publisher + controller_manager + spawn)
@@ -71,7 +79,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # 6. Static TF: body_link → laser frame (Gazebo uses scoped name as frame_id)
+    # 6. Static TF: body_link → laser frame
     laser_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -79,7 +87,7 @@ def generate_launch_description():
             '--x', '0', '--y', '0', '--z', '0.22',
             '--roll', '0', '--pitch', '0', '--yaw', '0',
             '--frame-id', 'body_link',
-            '--child-frame-id', 'ackermann_robot/body_link/lidar',
+            '--child-frame-id', 'body_link/lidar',
         ],
         parameters=[{'use_sim_time': True}],
     )
@@ -98,6 +106,10 @@ def generate_launch_description():
         set_gz_resource_path,
         gz_sim,
         bridge,
+        TimerAction(
+            period=2.0,
+            actions=[scan_filter],
+        ),
         # Delay ackermann_control until Gazebo is running
         TimerAction(
             period=2.0,

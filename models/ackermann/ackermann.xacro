@@ -39,7 +39,7 @@
         <box size="${body_length} ${body_width} ${body_height}"/>
       </geometry>
       <material name="body_material">
-        <color rgba="0.25 0.25 0.25 1.0"/>
+        <color rgba="0.5 0.0 0.5 1.0"/>
       </material>
     </visual>
     <collision>
@@ -74,7 +74,7 @@
     </collision>
     <inertial>
       <mass value="0.01"/>
-      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0"/>
+      <inertia ixx="1e-6" ixy="0.0" ixz="0.0" iyy="1e-6" iyz="0.0" izz="1e-6"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
     </inertial>
   </link>
@@ -132,7 +132,7 @@
     </collision>
     <inertial>
       <mass value="0.01"/>
-      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0"/>
+      <inertia ixx="1e-6" ixy="0.0" ixz="0.0" iyy="1e-6" iyz="0.0" izz="1e-6"/>
       <origin xyz="0 0 0" rpy="0 0 0"/>
     </inertial>
   </link>
@@ -303,6 +303,11 @@
 
   <!-- ========== Gazebo Surface Friction ========== -->
   <gazebo reference="body_link">
+    <material>
+      <ambient>0.5 0.0 0.5 1.0</ambient>
+      <diffuse>0.5 0.0 0.5 1.0</diffuse>
+      <specular>0.6 0.1 0.6 1.0</specular>
+    </material>
     <mu1>0.0001</mu1>
     <mu2>0.0001</mu2>
   </gazebo>
@@ -394,6 +399,7 @@
       <robot_base_frame>body_link</robot_base_frame>
       <odom_topic>/odom</odom_topic>
       <dimensions>3</dimensions>
+      <publish_tf>false</publish_tf>
     </plugin>
   </gazebo>
 
@@ -403,12 +409,12 @@
   <gazebo reference="body_link">
     <sensor name="lidar" type="gpu_lidar">
       <pose>0 0 0.22 0 0 0</pose>
-      <topic>/scan</topic>
+      <topic>/scan_raw</topic>
       <update_rate>10</update_rate>
       <lidar>
         <scan>
           <horizontal>
-            <samples>3200</samples>
+            <samples>720</samples>
             <resolution>1</resolution>
             <min_angle>0.0</min_angle>
             <max_angle>6.28318</max_angle>
@@ -416,7 +422,7 @@
         </scan>
         <range>
           <min>0.15</min>
-          <max>18.0</max>
+          <max>16.0</max>
         </range>
       </lidar>
       <visualize>true</visualize>

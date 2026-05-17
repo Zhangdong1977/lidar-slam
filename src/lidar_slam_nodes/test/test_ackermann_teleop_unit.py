@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for sim_ackermann_teleop.py core logic.
+"""Unit tests for ackermann_keyboard_teleop.py core logic.
 
 Tests key bindings, speed adjustment, and stale-limit behavior
 without requiring ROS2 or keyboard hardware.
@@ -30,7 +30,7 @@ sys.modules['geometry_msgs'] = geo_fake
 sys.modules['geometry_msgs.msg'] = geo_fake.msg
 
 # Inject the module's namespace so we can reference its symbols
-source_path = os.path.join(os.path.dirname(__file__), 'sim_ackermann_teleop.py')
+source_path = os.path.join(os.path.dirname(__file__), '..', 'lidar_slam_nodes', 'ackermann_keyboard_teleop.py')
 with open(source_path) as f:
     source = f.read()
 # Strip shebang and import lines that need heavy deps, keep data/logic
@@ -47,6 +47,8 @@ for line in source.split('\n'):
         mod = stripped.split()[1].split('.')[0]
         if mod in skip:
             continue
+    if stripped.startswith("if __name__"):
+        continue
     lines.append(line)
 
 exec('\n'.join(lines))
@@ -144,7 +146,7 @@ def test_twist_composition():
 # Run
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
-    print('Running unit tests for sim_ackermann_teleop.py ...')
+    print('Running unit tests for ackermann_keyboard_teleop.py ...')
     for name, fn in list(globals().items()):
         if name.startswith('test_') and callable(fn):
             fn()

@@ -41,8 +41,9 @@ def generate_launch_description():
     )
 
     # 3. Load controllers into Gazebo-internal controller_manager (delayed)
-    load_controllers = ExecuteProcess(
-        cmd=['python3', os.path.join(os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam'), 'scripts', 'load_controllers.py')],
+    load_controllers = Node(
+        package='lidar_slam_nodes',
+        executable='load_controllers',
         output='screen',
     )
 

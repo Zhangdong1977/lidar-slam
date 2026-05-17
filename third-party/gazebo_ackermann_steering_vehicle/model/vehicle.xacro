@@ -71,7 +71,7 @@
         <box size="${body_length} ${body_width} ${body_height}"/>
       </geometry>
       <material name="body_material">
-        <color rgba="0.25 0.25 0.25 1.0"/>
+        <color rgba="0.5 0.0 0.5 1.0"/>
       </material>
     </visual>
     <collision>
@@ -247,7 +247,7 @@
       </geometry>
 
       <material name="camera_stick_material">
-        <color rgba="0.25 0.25 0.25 1.0"/>
+        <color rgba="0.5 0.0 0.5 1.0"/>
       </material>
     </visual>
 
@@ -365,6 +365,11 @@
 
   <!-- Gazebo Parameters -->
   <gazebo reference="body_link">
+    <material>
+      <ambient>0.5 0.0 0.5 1.0</ambient>
+      <diffuse>0.5 0.0 0.5 1.0</diffuse>
+      <specular>0.6 0.1 0.6 1.0</specular>
+    </material>
     <mu1>0.0001</mu1>
     <mu2>0.0001</mu2>
   </gazebo>

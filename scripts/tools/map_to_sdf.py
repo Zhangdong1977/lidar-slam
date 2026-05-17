@@ -6,7 +6,7 @@ box models in SDF 1.9 format. Uses row/column scanning with segment merging
 to produce a reasonable number of wall models.
 
 Usage:
-    python3 scripts/map_to_sdf.py --map maps/real_map_big_fix.yaml --output worlds/real_map_big_fix.sdf
+    python3 scripts/tools/map_to_sdf.py --map maps/real_map_big_fix.yaml --output worlds/real_map_big_fix.sdf
 """
 
 import argparse
