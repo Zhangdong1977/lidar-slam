@@ -20,6 +20,10 @@ class ScanRangeFilter(Node):
         for i, r in enumerate(msg.ranges):
             if math.isnan(r):
                 msg.ranges[i] = float('inf')
+        # Strip Gazebo model namespace from frame_id:
+        #   "ackermann_robot/body_link/lidar" -> "body_link/lidar"
+        if '/' in msg.header.frame_id:
+            msg.header.frame_id = msg.header.frame_id.split('/', 1)[1]
         self._pub.publish(msg)
 
 
