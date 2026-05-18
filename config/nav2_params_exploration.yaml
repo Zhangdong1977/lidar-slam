@@ -55,7 +55,7 @@ controller_server:
       lookahead_time: 2.0
       rotate_to_heading_angular_vel: 0.5
       transform_tolerance: 2.0
-      use_velocity_scaled_lookahead_dist: true
+      use_velocity_scaled_lookahead_dist: false
       min_approach_linear_velocity: 0.08
       approach_velocity_scaling_dist: 0.5
       max_allowed_time_to_collision_up_to_carrot: 3.0
@@ -64,6 +64,8 @@ controller_server:
       regulated_linear_scaling_min_radius: 0.4
       regulated_linear_scaling_min_speed: 0.05
       allow_reversing: true
+      use_collision_detection: false
+      use_rotate_to_heading: false
       max_angular_accel: 1.5
       max_robot_pose_search_dist: 10.0
 
@@ -93,11 +95,11 @@ local_costmap:
           raytrace_max_range: 4.0
           raytrace_min_range: 0.0
           obstacle_max_range: 4.0
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.6
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 1.5
-        inflation_radius: 0.65
+        cost_scaling_factor: 0.001
+        inflation_radius: 1.5
       always_send_full_costmap: True
 
 global_costmap:
@@ -125,14 +127,14 @@ global_costmap:
           clearing: True
           marking: True
           data_type: "LaserScan"
-          raytrace_max_range: 12.0
+          raytrace_max_range: 8.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 12.0
-          obstacle_min_range: 0.0
+          obstacle_max_range: 8.0
+          obstacle_min_range: 1.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 1.5
-        inflation_radius: 0.65
+        cost_scaling_factor: 0.001
+        inflation_radius: 1.5
       always_send_full_costmap: True
 
 map_saver:
@@ -166,7 +168,7 @@ planner_server:
       reverse_penalty: 2.0
       change_penalty: 0.1
       non_straight_penalty: 1.2
-      cost_penalty: 5.0
+      cost_penalty: 8.0
       retrospective_penalty: 0.015
       rotation_penalty: 0.0
       analytic_expansion_ratio: 3.5
@@ -260,11 +262,11 @@ collision_monitor:
       simulation_time_step: 0.1
       min_points: 6
       visualize: False
-      enabled: True
+      enabled: False
     observation_sources: ["scan"]
     scan:
       type: "scan"
-      topic: "scan"
+      topic: "/scan"
       min_height: 0.15
       max_height: 2.0
       enabled: True

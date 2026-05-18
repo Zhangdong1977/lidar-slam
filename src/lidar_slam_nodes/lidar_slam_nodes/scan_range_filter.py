@@ -17,14 +17,22 @@ class ScanRangeFilter(Node):
         self._pub = self.create_publisher(LaserScan, '/scan', 10)
 
     def _callback(self, msg: LaserScan):
-        for i, r in enumerate(msg.ranges):
-            if math.isnan(r):
-                msg.ranges[i] = float('inf')
+        out = LaserScan()
+        out.header = msg.header
+        out.angle_min = msg.angle_min
+        out.angle_max = msg.angle_max
+        out.angle_increment = msg.angle_increment
+        out.time_increment = msg.time_increment
+        out.scan_time = msg.scan_time
+        out.range_min = msg.range_min
+        out.range_max = msg.range_max
+        out.ranges = [float('inf') if math.isnan(r) else r for r in msg.ranges]
+        out.intensities = list(msg.intensities)
         # Strip Gazebo model namespace from frame_id:
         #   "ackermann_robot/body_link/lidar" -> "body_link/lidar"
         if '/' in msg.header.frame_id:
-            msg.header.frame_id = msg.header.frame_id.split('/', 1)[1]
-        self._pub.publish(msg)
+            out.header.frame_id = msg.header.frame_id.split('/', 1)[1]
+        self._pub.publish(out)
 
 
 def main():
