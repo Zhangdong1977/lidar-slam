@@ -9,7 +9,7 @@
       <PipelineSequence name="NavigateWithReplanning">
         <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
         <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
-        <RateController hz="0.3">
+        <RateController hz="0.1">
           <RecoveryNode number_of_retries="1" name="ComputePathToPose">
             <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
             <Sequence>
@@ -39,8 +39,8 @@
               <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
             </Sequence>
             <Wait wait_duration="3"/>
-            <BackUp backup_dist="1.5" backup_speed="0.25" error_code_id="{backup_code_id}"/>
-            <BackUp backup_dist="0.5" backup_speed="0.2" error_code_id="{backup_code_id}"/>
+            <BackUp backup_dist="2.5" backup_speed="0.25" error_code_id="{backup_code_id}"/>
+            <BackUp backup_dist="1.0" backup_speed="0.2" error_code_id="{backup_code_id}"/>
           </RoundRobin>
         </ReactiveFallback>
       </Sequence>
