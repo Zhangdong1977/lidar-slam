@@ -477,3 +477,156 @@
 |----------|----------|----------|
 | 同一 frontier 被重复选择 | 614 次发送 (-32.23, -28.47)，机器人静止 | 黑名单容忍度 0.25m→2.0m、重编译 |
 | 二进制未更新 | 源码比二进制新 10 小时 | `--cmake-clean-cache` 强制重编译 |
+
+---
+
+## 十二、第十二轮 (2026-05-19)：减少自动探索碰撞——双层修复
+
+> 基于日志：`log/explore_2026-05-19_11-16-55.log`
+
+### 根因分析
+
+11 分钟运行中：562 次碰撞检测、47 次导航中止、35 次规划器超迭代、13 次后退失败，最终卡死。
+
+**双重根因**：
+1. **Nav2 参数**：local inflation_radius=0.8 + cost_scaling_factor=3.0 保护带过窄；velocity_smoother 峰值速度 1.0 m/s 制动距离过长；控制器 transform_tolerance=2.0 允许过时 TF
+2. **Explore 源码**：frontier 目标选择时没有检查与已知障碍物的距离，导航目标点可能紧贴墙壁/障碍物
+
+### 12.1 explore 源码修改（第十二轮）
+
+| 文件 | 变更 | 调整原因 |
+|------|------|----------|
+| `explore.h` | 添加 `bool isTooCloseToObstacle(const Point& point)` 方法声明 | 新增障碍物距离检查 |
+| `explore.h` | 添加 `double min_obstacle_distance_` 成员变量 | 可配置的最小障碍物距离阈值 |
+| `explore.cpp` 构造函数 | 声明和获取 `min_obstacle_distance` 参数（默认 0.75m） | 通过 YAML 配置，无需重编译即可调整 |
+| `explore.cpp` | 实现 `isTooCloseToObstacle()`：在目标点周围圆形区域内搜索 LETHAL_OBSTACLE 单元格 | 使用 SLAM 原始地图（无膨胀），检查真实障碍物位置 |
+| `explore.cpp` makePlan() | 过滤条件添加 `isTooCloseToObstacle(f.middle)` | 跳过导航目标点周围 0.75m 内有障碍物的 frontier |
+
+**性能**：0.75m / 0.05m = 15 格半径，31×31 = 961 单元格/frontier。100 个 frontier × 961 ≈ 96K 查询/5 秒，< 1ms。
+
+### 12.2 config/explore_lite_params.yaml（第十二轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `min_obstacle_distance` | (新增) | `0.75` | frontier 导航目标点到最近障碍物的最小允许距离。机器人 footprint 最远端 0.45m，留 0.30m 安全余量 |
+
+### 12.3 config/nav2_params_exploration.yaml（第十二轮）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `local_costmap.inflation_layer` | `inflation_radius` | `0.8` | `1.0` | 增大膨胀半径，梯度保护带从 0.5m 增至 0.70m（内切圆 0.30m 不变）。第 6 轮已证 1.5 会瘫痪 6x6m 窗口 |
+| `local_costmap.inflation_layer` | `cost_scaling_factor` | `3.0` | `2.0` | 减缓代价衰减速度，csf=3.0 在 0.5m 处代价仅 59，csf=2.0 提升至约 92 |
+| `global_costmap.obstacle_layer.scan` | `obstacle_min_range` | `0.3` | `0.0` | 0.3m 以内障碍物被过滤，与 ackermann 配置一致 |
+| `controller_server.FollowPath` | `transform_tolerance` | `2.0` | `1.0` | 2 秒前的 TF 位姿偏差可达 0.3-0.5m |
+| `controller_server.FollowPath` | `approach_velocity_scaling_dist` | `0.5` | `0.6` | 增大减速起始距离，配合更大的 inflation_radius |
+| `controller_server.FollowPath` | `max_allowed_time_to_collision_up_to_carrot` | `3.0` | `1.5` | 碰撞预测窗口从 0.75m 缩小到 0.375m |
+| `velocity_smoother` | `max_velocity` | `[1.0, 0.0, 1.0]` | `[0.5, 0.0, 1.0]` | 峰值速度制动距离从 0.72m 降至 0.12m |
+| `velocity_smoother` | `max_accel` | `[1.5, 0.0, 2.5]` | `[1.0, 0.0, 2.0]` | 减少轮胎打滑和里程计漂移 |
+| `velocity_smoother` | `max_decel` | `[-1.5, 0.0, -2.5]` | `[-1.0, 0.0, -2.0]` | 与 max_accel 对称 |
+| `velocity_smoother` | `velocity_timeout` | `2.0` | `1.0` | 惯性滑行从 2 秒降至 1 秒 |
+| `collision_monitor.FootprintApproach` | `time_before_collision` | `2.0` | `1.5` | 配合降速后的 max_velocity=0.5 |
+
+### 第十二轮 (2026-05-19)：减少自动探索碰撞
+
+| 问题类别 | 日志表现 | 调整项数 | 核心改动 |
+|----------|----------|----------|----------|
+| 碰撞检测频繁 | 562 次 "detected collision ahead" | 10 项参数 + 1 项源码 | inflation_radius ↑, cost_scaling_factor ↓, max_velocity ↓, 新增 isTooCloseToObstacle 过滤 |
+| 导航频繁中止 | 47 次 abort，3 次黑名单 | 间接改善 | 控制器参数收紧 + frontier 障碍物距离过滤 |
+| 规划器超迭代 | 35 次超迭代，目标不可达 | 间接改善 | global obstacle_min_range 归零 |
+| 后退恢复失败 | 13 次 backup failed | 间接改善 | 碰撞减少后触发次数降低 |
+
+---
+
+## 十三、第十三轮 (2026-05-19)：优化 Ackermann 脱困/调头行为——消除前后振荡
+
+> 问题：脱困和调头时前后移动幅度过小，频繁前进后退振荡
+
+### 根因分析
+
+Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_reversing=true`）在航向偏差超过 90° 时发出倒车+转向命令，但由于倒车速度过低（-0.35 m/s），移动一点后 lookahead 点更新导致航向偏差回落到 90° 以下，RPP 切换回前进方向 → 小车又朝障碍物移动 → collision_detection 触发减速/停止 → 回到倒车 → **无限振荡**。
+
+同时 `regulated_linear_scaling_min_speed=0.05` 和 `min_approach_linear_velocity=0.08` 导致在障碍物附近以极低速度蠕行（实际≈不动），`cost_scaling_factor=2.0` 使代价衰减不够快，大面积高代价区域持续降速。
+
+### 13.1 config/nav2_params_exploration.yaml（第十三轮）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `velocity_smoother.ros__parameters` | `min_velocity` | `[-0.35, 0.0, -1.0]` | `[-0.5, 0.0, -1.0]` | 提高倒车最大速度，让小车在调头时有足够速度完成弧线动作，避免被RPP频繁切换方向 |
+| `controller_server.FollowPath` | `min_approach_linear_velocity` | `0.08` | `0.15` | 提高最低速度，避免在障碍物附近以 0.08 m/s 蠕行（实际≈不动），至少保持可感知的移动 |
+| `controller_server.FollowPath` | `regulated_linear_scaling_min_speed` | `0.05` | `0.15` | 提高最小巡航速度，costmap 高代价区域不再降到 0.05 m/s，保持有效移动能力 |
+| `local_costmap.inflation_layer` | `cost_scaling_factor` | `2.0` | `4.0` | 加速代价衰减，远离障碍物的区域代价更低，减少不必要的减速区域面积 |
+| `global_costmap.inflation_layer` | `cost_scaling_factor` | `2.0` | `4.0` | 同上，全局代价地图也加速衰减 |
+| `planner_server.GridBased` | `reverse_penalty` | `2.0` | `1.5` | 降低倒车惩罚，鼓励规划出连贯的倒车调头路径而非多次方向切换 |
+
+### 13.2 config/nav2_params_ackermann.yaml（第十三轮）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `velocity_smoother.ros__parameters` | `min_velocity` | `[-0.35, 0.0, -1.0]` | `[-0.5, 0.0, -1.0]` | 与探索模式保持一致 |
+| `controller_server.FollowPath` | `min_approach_linear_velocity` | `0.05` | `0.15` | 与探索模式保持一致 |
+| `controller_server.FollowPath` | `regulated_linear_scaling_min_speed` | `0.05` | `0.15` | 与探索模式保持一致 |
+| `local_costmap.inflation_layer` | `cost_scaling_factor` | `1.0` | `2.0` | 加速代价衰减，减少减速区域 |
+| `global_costmap.inflation_layer` | `cost_scaling_factor` | `1.5` | `3.0` | 同上 |
+
+### 13.3 behavior_trees/ackermann_nav.xml（第十三轮）
+
+| 参数位置 | 变更 | 调整原因 |
+|----------|------|----------|
+| `RecoveryActions.RoundRobin` 顺序 | 清地图→等3s→退2.5m→退1.0m 改为 **退3.5m→清地图→等2s→退2.0m** | 脱困时最需要的是立即后退，不应先浪费时间清地图和等待。后退前置可第一时间脱离障碍物 |
+| `BackUp` 第一个 | `backup_dist=2.5, backup_speed=0.25` → `backup_dist=3.5, backup_speed=0.35` | 增大后退距离和速度，配合提高的 min_velocity(-0.5)，一次后退足够远离障碍物 |
+| `BackUp` 第二个 | `backup_dist=1.0, backup_speed=0.2` → `backup_dist=2.0, backup_speed=0.3` | 同上 |
+| `Wait` | `wait_duration=3` → `wait_duration=2` | 减少无效等待时间 |
+
+### 第十三轮 (2026-05-19)：优化 Ackermann 脱困/调头行为
+
+| 问题类别 | 日志表现 | 调整项数 | 核心改动 |
+|----------|----------|----------|----------|
+| 调头前后振荡 | 小车在死胡同频繁前进后退，移动幅度极小 | 6 参数 + BT | velocity_smoother 倒车速度 ↑, 最小速度 ↑, cost_scaling_factor ↑, reverse_penalty ↓, BackUp 前置+增大距离 |
+| 障碍物附近蠕行 | 0.05 m/s 速度下实际未移动 | 2 参数 | min_approach_velocity ↑, regulated_min_speed ↑ |
+| BT恢复效率低 | 脱困时先清地图等3s才后退 | BT重构 | BackUp 移到 RoundRobin 第一位 |
+
+---
+
+## 十四、openTCS 集成参数（2026-05-19）
+
+### 概述
+
+新增 `opentcs_nav2_bridge` 桥接节点，将 openTCS-NeNa 调度系统的 topic 接口与 Nav2 NavigateToPose action 对接。
+
+### 14.1 桥接节点参数 (`opentcs_nav2_bridge`)
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `goal_pose_topic` | `/goal_pose` | openTCS 发布的导航目标 topic (PoseStamped) |
+| `amcl_pose_topic` | `/amcl_pose` | 发布给 openTCS 的机器人位置 topic (PoseWithCovarianceStamped) |
+| `nav_action_name` | `/navigate_to_pose` | Nav2 导航 action 名称 |
+| `target_frame` | `map` | TF 目标帧（用于读取机器人位置） |
+| `source_frame` | `body_link` | TF 源帧 |
+| `pose_publish_rate` | `10.0` | 位置发布频率 Hz，10Hz 足以满足调度系统跟踪需求 |
+
+### 14.2 DDS 兼容性配置
+
+| 环境变量 | 值 | 说明 |
+|----------|-----|------|
+| `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | 与 openTCS-NeNa IHMC Fast-RTPS 对齐，确保 DDS 发现兼容 |
+| `ROS_DOMAIN_ID` | `42` | 当前环境默认值 42，openTCS-NeNa 默认=30，需在 Kernel Control Center 中改为 42 |
+
+### 14.3 工厂世界关键坐标参考
+
+充电站位置（来自 factory.sdf）：
+| 名称 | ROS2 (x, y) m |
+|------|---------------|
+| charger_1 | (38, 38) |
+| charger_2 | (41, 38) |
+| charger_3 | (44, 38) |
+| charger_4 | (38, 44) |
+| charger_5 | (41, 44) |
+| charger_6 | (44, 44) |
+
+### 14.4 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_nav2_bridge.py` | 桥接节点 |
+| `launch/sim_ackermann_opentcs.launch.py` | 集成 launch 文件（基于 sim_ackermann_nav + 桥接节点） |
+| `scripts/launch/sim_ackermann_opentcs.sh` | 启动脚本 |

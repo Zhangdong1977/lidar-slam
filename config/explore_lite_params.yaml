@@ -12,3 +12,4 @@
     gain_scale: 0.5
     transform_tolerance: 0.3
     min_frontier_size: 0.75
+    min_obstacle_distance: 0.75
