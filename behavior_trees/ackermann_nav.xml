@@ -30,6 +30,7 @@
         <Fallback>
           <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
           <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+          <AreErrorCodesPresent error_code="{compute_path_error_code}" error_codes_to_check="205;206"/>
         </Fallback>
         <ReactiveFallback name="RecoveryFallback">
           <GoalUpdated/>

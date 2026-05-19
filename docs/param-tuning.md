@@ -244,3 +244,236 @@
 **根因分析**：碰撞检测本身正常工作——`max_allowed_time_to_collision_up_to_carrot: 3.0`（前视 0.75m）在检测到致命代价时正确触发警告。问题在于局部代价地图的 `inflation_radius: 1.5` 导致障碍物周围 1.5m 内布满膨胀代价，而 6×6m 窗口内几乎所有区域都被致命代价覆盖。当 frontier 目标仅 1.17m 远且位于已知/未知边界时，RPP 前视弧必然命中致命单元，控制器拒绝输出速度。第一轮曾将 local `inflation_radius` 从 1.0 降至 0.55，但后续被改回 1.5。0.6m 的膨胀半径（车体半长 0.45m + 0.15m 余量）在保证安全的同时，避免过度填充狭窄过道。
 
 **根因分析**：代价地图扩张至 1507×1996 像素（约 75m×100m），SmacPlannerHybrid 使用 REEDS_SHEPP 运动模型 + 144 角度分箱，总状态数约 4.3 亿。100 万次迭代仅搜索了 0.23% 的状态空间。开启 2 倍降采样后状态数降至 1.1 亿，配合 200 万次迭代可探索约 1.8%。同时增大分析扩展参数使规划器在开阔区域快速跳过大片空白格子。
+
+---
+
+## 七、第七轮 (2026-05-18)：修复 Start Occupied 死锁——机器人与障碍物碰撞后永久卡死
+
+> 基于日志：`log/explore_2026-05-18_21-43-34.log`
+
+### 根因分析
+
+机器人自主探索时与障碍物碰撞后永久卡死，循环报错 `Start occupied`（SmacPlannerHybrid 错误码 205）。问题分三层：
+
+1. **如何进入障碍物**：控制器检测到碰撞 → `failure_tolerance: 5.0` 允许 5 次连续失败 → 每次失败清除 local costmap → 机器人逐渐向前蠕动 → 最终物理上进入障碍物内部
+2. **为何无法恢复（核心 Bug）**：SmacPlannerHybrid 返回错误码 205（START_OCCUPIED），但 BT 的恢复门 `WouldAPlannerRecoveryHelp` 只检查 200/207/208 三个错误码，**不包含 205**。Fallback 门返回 FAILURE，整个恢复分支（包含 BackUp 倒车）被跳过
+3. **explore 雪上加霜**：explore 节点收到 ABORTED 后立即将 frontier 加入黑名单 → 选下一个 → 同样 Start occupied → 也被黑名单 → 最终所有 frontier 被黑名单 → 永久死锁
+
+### 7.1 behavior_trees/ackermann_nav.xml（第七轮）
+
+| 参数位置 | 变更 | 调整原因 |
+|----------|------|----------|
+| 恢复门 Fallback | 添加 `AreErrorCodesPresent error_code="{compute_path_error_code}" error_codes_to_check="205;206"` | **核心修复**：START_OCCUPIED(205) 和 GOAL_OCCUPIED(206) 错误码被 WouldAPlannerRecoveryHelp 忽略，导致 BackUp 倒车恢复永远不执行 |
+
+### 7.2 config/nav2_params_exploration.yaml（第七轮）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `controller_server.ros__parameters` | `failure_tolerance` | `5.0` | `2.0` | 减少允许连续失败次数，阻止机器人蠕动进入障碍物 |
+| `local_costmap.local_costmap.ros__parameters.inflation_layer` | `inflation_radius` | `0.6` | `0.8` | 增大本地膨胀半径，提早避开障碍物 |
+| `local_costmap.local_costmap.ros__parameters.inflation_layer` | `cost_scaling_factor` | `2.0` | `3.0` | 配合更大膨胀半径，使代价衰减更陡峭 |
+
+### 7.3 explore_lite 源码修改（第七轮）
+
+| 文件 | 变更 | 调整原因 |
+|------|------|----------|
+| `explore.h` | 添加 `consecutive_aborts_` 计数器和 `kMaxConsecutiveAborts=5` 常量 | 替代立即黑名单的逻辑，允许 BT 有机会执行恢复 |
+| `explore.cpp reachedGoal()` | ABORTED 时递增计数器，仅连续 5 次 abort 后才黑名单 | 原代码首次 abort 即黑名单，导致 Start Occupied 时迅速耗尽所有 frontier |
+
+---
+
+## 八、第八轮 (2026-05-18)：修复 explore 二进制未更新 + frontier 选择振荡
+
+> 基于日志：`log/explore_2026-05-18_22-45-25.log`
+
+### 根因
+
+1. **旧二进制未编译**：上一轮 colcon build 未检测到源码变更，运行的是 5 月 16 日的旧二进制，包含源码中不存在的 "Frontier too close" 功能
+2. **centroid vs middle**：源码使用 `frontier->centroid`（常在机器人附近）而非 `frontier->middle`（更远的目标点），导致"瞬间到达"然后空等 progress_timeout
+3. **same_goal 阻塞**：目标成功后 `prev_goal_` 未重置，`same_goal` 检查阻止发送新目标
+4. **abort 振荡**：`planner_frequency=0.5`（每 2 秒重规划）导致每 4-6 秒 abort 当前导航，`kMaxConsecutiveAborts=5` 过低，正常重规划即触发黑名单 → 双向黑名单 → 远距离跳跃
+
+### 8.1 explore 源码修改（第八轮）
+
+| 文件 | 变更 | 调整原因 |
+|------|------|----------|
+| `explore.h` | `kMaxConsecutiveAborts` 5→20 | 允许更多正常重规划 abort，避免过早黑名单 |
+| `explore.cpp` | `frontier->centroid` → `frontier->middle` | 用中点（更远）而非质心（常在机器人附近）作为目标 |
+| `explore.cpp` | `RCLCPP_DEBUG` → `RCLCPP_INFO`（found frontiers, Sending goal） | 关键日志提升到 INFO 级别，便于调试 |
+| `explore.cpp` | 成功后重置 `prev_goal_` | 解除 same_goal 阻塞，允许发送新目标 |
+
+### 8.2 config/explore_lite_params.yaml（第八轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `planner_frequency` | 0.5 | 0.2 | 降低重规划频率（2s→5s），减少 abort 次数，给机器人更多时间完成当前导航 |
+| `potential_scale` | 1.0 | 2.0 | 增加距离惩罚，减少追逐远距离大 frontier 导致的方向跳跃 |
+| `gain_scale` | 2.5 | 2.0 | 略降低大小奖励，平衡距离和大小因素 |
+
+### 第八轮 (2026-05-18)：修复 explore 编译和 frontier 振荡
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 旧二进制运行 | "Frontier too close" 消息不在源码中 | 强制清理 build/ 重新编译 |
+| 目标点过近 | centroid (0.01,-0.05) 即刻到达 | `frontier->centroid` → `frontier->middle` |
+| same_goal 阻塞 | 目标成功后 90 秒无新目标 | 成功后重置 `prev_goal_` |
+| abort 振荡 | 19m 跳跃 SE↔SW，双向黑名单 | `kMaxConsecutiveAborts` 5→20, `planner_frequency` 0.5→0.2, 代价权重调整 |
+
+---
+
+## 九、第九轮 (2026-05-18)：修复 frontier 远距离跳跃 + 目标持久化
+
+> 基于日志：`log/explore_2026-05-18_22-54-25.log`
+
+### 根因
+
+1. **代价函数失衡**：`min_distance`（米，2-20）和 `size`（格数，3000-60000）都乘 resolution(0.05)，距离项 0.1-1.0 vs size 项 150-3000，差距 1000 倍。无论怎么调 potential_scale/gain_scale，大 frontier 永远赢
+2. **same_point 过严**：容差 0.01m，SLAM 更新使 frontier middle 移动 0.5-1.5m，导致同一 frontier 被识别为新目标 → abort 当前导航
+3. **prev_goal_ 重置**：上一轮添加的成功后重置导致 same_goal 检查失效
+
+### 9.1 源码修改（第九轮）
+
+| 文件 | 变更 | 调整原因 |
+|------|------|----------|
+| `explore.cpp same_point()` | 容差 0.01m → 2.0m | SLAM 更新使 frontier middle 移动 0.5-1.5m，2.0m 容差确保同一 frontier 不被 abort |
+| `explore.cpp reachedGoal()` | 移除成功后的 `prev_goal_` 重置 | 到达后 SLAM 更新会自然改变 frontier 排列，无需强制重置 |
+| `frontier_search.cpp frontierCost()` | 移除 `min_distance × resolution` | min_distance 已是米制，再乘 0.05 无意义。只对 size 乘 resolution 转 m² |
+
+### 9.2 参数调整（第九轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `potential_scale` | 2.0 | 5.0 | 配合代价函数修复，距离惩罚生效（距离项 10-100 vs size 项 100-3000） |
+| `gain_scale` | 2.0 | 1.0 | 降低 size 权重，平衡距离 |
+
+### 第九轮 (2026-05-18)：修复 frontier 远距离跳跃
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 代价函数失衡 | 远 17m frontier(size=6567) 总赢近 5m(size=3000) | 移除 distance × resolution，增大 potential_scale |
+| 重规划 abort | 每 5 秒 abort 切换方向 | same_point 容差 0.01→2.0m + 恢复 prev_goal_ |
+
+### 9.3 时间源崩溃修复（第九轮续）
+
+**现象**：explore 节点启动后立即崩溃：`std::runtime_error: can't subtract times with different time sources [1 != 2]`
+
+**根因**：`last_progress_`（`rclcpp::Time`）默认构造使用 RCL_ROS_TIME (source=1)，但 `use_sim_time: True` 时 `this->now()` 返回 SIM_TIME (source=2)。在 `makePlan()` 中 `this->now() - last_progress_` 减法要求同一时间源。
+
+**修复**：添加 `bool progress_initialized_` 标志，首次成功赋值 `last_progress_` 时才设为 true，超时检查仅在已初始化时执行：
+
+| 文件 | 改动 | 说明 |
+|------|------|------|
+| `explore.h` | 添加 `bool progress_initialized_ = false` | 新增标志位 |
+| `explore.cpp makePlan()` | 赋值分支添加 `progress_initialized_ = true` | 首次赋值标记 |
+| `explore.cpp makePlan()` | 超时检查前置 `progress_initialized_ &&` | 避免未初始化时做时间减法 |
+
+### 9.4 首个目标被 same_goal 吞掉（第九轮续）
+
+**现象**：explore 每 5 秒找到同一 frontier 但从不发送导航目标，机器人静止不动
+
+**根因**：`prev_goal_` 初始值 (0,0,0) 与第一个 frontier middle (-1.05, 1.04) 距离 1.48m < same_point 容差 2.0m，被误判为"同一目标"跳过
+
+**修复**：添加 `bool first_goal_sent_ = false`，`same_goal = first_goal_sent_ && same_point(...)`，发送目标后设 `first_goal_sent_ = true`
+
+### 9.5 引入 navigating_ 状态锁（第九轮最终修复）
+
+**现象**：机器人导航到 frontier A 途中，SLAM 发现更大的 frontier B（代价更低），timer 触发 makePlan() 后发送新目标到 B，Nav2 preempts 当前导航，机器人转向
+
+**根因**：`same_point` 机制只能阻止发送**同一个** frontier（距离 < 2.0m），**完全无法阻止**发送一个**不同的** frontier。代码中没有任何"机器人是否正在导航"的状态追踪
+
+**修复**：用 `bool navigating_` 标志替代整个 `same_goal`/`same_point` 机制：
+
+| 位置 | 改动 |
+|------|------|
+| `explore.h` | `navigating_` 替换 `first_goal_sent_`，移除 same_goal 相关逻辑 |
+| `makePlan()` 开头 | `navigating_==true` 时只检查 progress timeout（用机器人到目标的距离），不搜索新 frontier |
+| `makePlan()` 发送目标时 | 设置 `navigating_=true`、`prev_goal_`、`prev_distance_`、`last_progress_` |
+| `reachedGoal()` | 所有分支开头设 `navigating_=false` |
+| `stop()` | 设 `navigating_=false` |
+
+**行为变化**：
+- 导航中 timer 触发 → 只检查是否卡住，不做 frontier 搜索，不发新目标
+- 到达目标(SUCCEEDED) → navigating_=false → makePlan() 搜索新 frontier 并发送
+- 卡住超时(90s) → cancel 当前目标、blacklist、navigating_=false → 搜索新 frontier
+- ABORTED → navigating_=false → 等 timer 触发时自动搜索新 frontier
+
+---
+
+## 十、第十轮 (2026-05-19)：修复机器人卡死——无限循环发送同一目标点
+
+> 基于日志：`log/explore_2026-05-19_09-19-22.log`
+
+### 根因分析
+
+机器人探索时卡死，explore节点每 0.5 秒循环：发送目标 → Nav2 瞬间"到达" → 再次选同一frontier → 重复 596 次。
+
+**四个叠加的bug：**
+
+1. **`gain_scale=1.0` 使巨型frontier永远被选中**：代价公式 `cost = potential_scale × min_distance - gain_scale × size × resolution`，frontier 0 (size=10430) 的 cost=-517.6，其他frontier均为正值(60+)，永远排第一
+2. **Nav2瞬间判定到达**：规划器 tolerance=2.0m，目标距机器人仅 0.78m，控制器 0.2ms 内报告 "Reached the goal!"
+3. **成功到达后不加黑名单**：`reachedGoal(SUCCEEDED)` 只调用 `makePlan()`，不加黑名单
+4. **黑名单逻辑不一致**：存储的是 middle 点(-38.97, 7.07)，检查的是 centroid(-43.72, 14.25)，两者相距 7.8m，黑名单永远匹配不上
+
+### 10.1 explore 源码修改（第十轮）
+
+| 文件 | 变更 | 调整原因 |
+|------|------|----------|
+| `explore.h` | 添加 `geometry_msgs::msg::Point prev_centroid_` 成员 | 存储 frontier 质心，用于正确的黑名单匹配 |
+| `explore.cpp makePlan()` | frontier 选择条件添加 `f.min_distance < 1.0` 跳过太近的frontier | 距机器人<1.0m 的 frontier 的 middle 点已在脚下，Nav2 瞬间判定到达 |
+| `explore.cpp makePlan()` | 添加 `prev_centroid_ = frontier->centroid` | 存储质心供黑名单使用 |
+| `explore.cpp reachedGoal()` | SUCCEEDED 分支添加 `frontier_blacklist_.push_back(prev_centroid_)` | 成功到达后加黑名单，防止重复选择同一 frontier |
+| `explore.cpp makePlan()` progress timeout | `frontier_blacklist_.push_back(prev_goal_)` → `prev_centroid_` | 修复黑名单：用 centroid 而非 middle 存储，与 `goalOnBlacklist(f.centroid)` 检查一致 |
+
+### 10.2 config/explore_lite_params.yaml（第十轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `gain_scale` | 1.0 | 0.5 | 降低巨型 frontier 的支配力，让距离因素更重要。frontier 0(size=10430) 的 size 项从 521.5 降至 260.8 |
+
+### 10.3 config/nav2_params_exploration.yaml（第十轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `planner_server.GridBased.tolerance` | 2.0 | 0.75 | 规划器容差过大导致 0.78m 外的目标被瞬间"到达"，降至 0.75m 迫使规划器创建实际路径 |
+| `controller_server.general_goal_checker.xy_goal_tolerance` | 0.5 | 0.35 | 更严格的目标到达判定，配合缩小的规划容差 |
+
+### 第十轮 (2026-05-19)：修复机器人卡死无限循环
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 同一frontier被重复选择 | 596次发送同一目标(-38.97, 7.07) | 成功后加黑名单(用centroid)、最小距离过滤(<1.0m跳过)、gain_scale降低 |
+| Nav2瞬间到达 | 控制器0.2ms报告"Reached the goal!" | planner tolerance 2.0→0.75, xy_goal_tolerance 0.5→0.35 |
+| 黑名单失效 | centroid与middle相差7.8m，永远匹配不上 | 黑名单存储改为用centroid |
+
+---
+
+## 十一、第十一轮 (2026-05-19)：修复同一 frontier 因黑名单容忍度过小被重复选择
+
+> 基于日志：`log/explore_2026-05-19_09-45-17.log`
+
+### 根因分析
+
+机器人探索时卡死，614 次发送同一目标 (-32.23, -28.47)，机器人完全不移动。三层叠加：
+
+1. **二进制未更新（主因）**：源码最后修改 09:42，编译二进制停留在 18 日 23:26。第十轮的 `min_distance < 1.0` 过滤器和 `prev_centroid_` 黑名单修复未编译进运行中的二进制
+2. **黑名单容忍度过小**：`goalOnBlacklist()` 使用 `5 × resolution = 0.25m` 容忍度匹配质心。同一物理 frontier 在 SLAM 更新后质心偏移 0.5-0.75m（如 (-39.45,-19.34)→(-40.09,-19.02)），远超 0.25m 阈值，黑名单形同虚设
+3. **巨型 frontier 支配**：frontier 0 (size=7561) 代价 cost=-186，远超其他 frontier（frontier 1 cost=-175），始终被选中
+
+### 11.1 explore 源码修改（第十一轮）
+
+| 文件 | 变更 | 调整原因 |
+|------|------|----------|
+| `explore.cpp goalOnBlacklist()` | `tolerace` 5→40 (0.25m→2.0m) | 同一 frontier 质心在 SLAM 更新间偏移 0.5-0.75m，0.25m 容忍度无法匹配。2.0m 覆盖质心偏移且不误匹配不同 frontier（间距通常 >5m） |
+
+### 11.2 编译修复（第十一轮）
+
+| 操作 | 说明 |
+|------|------|
+| `colcon build --packages-select explore_lite --cmake-clean-cache` | 强制完全重编译，确保第十轮和第十一轮的所有源码修改生效 |
+
+### 第十一轮 (2026-05-19)：修复黑名单容忍度过小
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 同一 frontier 被重复选择 | 614 次发送 (-32.23, -28.47)，机器人静止 | 黑名单容忍度 0.25m→2.0m、重编译 |
+| 二进制未更新 | 源码比二进制新 10 小时 | `--cmake-clean-cache` 强制重编译 |
