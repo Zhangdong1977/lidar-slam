@@ -41,17 +41,19 @@ class FrontierExplorer(Node):
         self.declare_parameter('heading_weight', 2.0)
         self.declare_parameter('max_goal_distance', 15.0)
         self.declare_parameter('min_goal_distance', 1.0)
-        self.declare_parameter('max_heading_diff', 3.0)
+        self.declare_parameter('max_heading_diff', 2.5)
         self.declare_parameter('explore_rate', 0.5)
         self.declare_parameter('completion_check_count', 10)
         self.declare_parameter('planning_retry_count', 5)
         self.declare_parameter('max_global_retries', 1)
         self.declare_parameter('min_free_cells', 500)
-        self.declare_parameter('stuck_timeout', 10.0)
-        self.declare_parameter('stuck_distance', 0.15)
+        self.declare_parameter('stuck_timeout', 180.0)
+        self.declare_parameter('stuck_distance', 0.5)
         self.declare_parameter('goal_obstacle_clearance', 0.6)
         self.declare_parameter('initial_warmup_seconds', 10.0)
         self.declare_parameter('nav2_wait_timeout', 120.0)
+        self.declare_parameter('blacklist_radius', 5.0)
+        self.declare_parameter('stuck_position_count', 3)
 
         self.frontier_min_size = self.get_parameter('frontier_min_size').value
         self.size_weight = self.get_parameter('size_weight').value
@@ -68,6 +70,8 @@ class FrontierExplorer(Node):
         self.max_global_retries = self.get_parameter('max_global_retries').value
         self.initial_warmup_seconds = self.get_parameter('initial_warmup_seconds').value
         self.nav2_wait_timeout = self.get_parameter('nav2_wait_timeout').value
+        self.blacklist_radius = self.get_parameter('blacklist_radius').value
+        self.stuck_position_count = self.get_parameter('stuck_position_count').value
         completion_check_count = self.get_parameter('completion_check_count').value
         explore_rate = self.get_parameter('explore_rate').value
 
@@ -85,6 +89,10 @@ class FrontierExplorer(Node):
         self.current_goal_handle = None
         self.last_progress_pose = None
         self.last_progress_time = None
+
+        # Position-level stuck detection
+        self.stuck_position = None
+        self.stuck_at_position_count = 0
 
         # Startup tracking
         self._start_time = self.get_clock().now()
@@ -305,28 +313,49 @@ class FrontierExplorer(Node):
 
         scored.sort(key=lambda x: x[0], reverse=True)
 
-        # Filter Ackermann-infeasible and already-tried
-        goals = []
+        # Two-pass filtering: strict (heading-feasible) then relaxed (any heading)
+        strict_goals = []
+        relaxed_goals = []
         for score, gx, gy, size in scored:
-            if not self.is_ackermann_feasible(gx, gy, rx, ry, ryaw):
+            # Distance check (always apply)
+            dist = math.sqrt((gx - rx) ** 2 + (gy - ry) ** 2)
+            if dist < self.min_goal_distance or dist > self.max_goal_distance:
                 continue
+            # Blacklist checks (always apply)
             already_tried = False
             for tx, ty in self.tried_centroids:
-                if math.sqrt((gx - tx) ** 2 + (gy - ty) ** 2) < self.min_goal_distance:
+                if math.sqrt((gx - tx) ** 2 + (gy - ty) ** 2) < self.blacklist_radius:
                     already_tried = True
                     break
             if already_tried:
                 continue
             already_failed = False
             for fx, fy in self.failed_centroids:
-                if math.sqrt((gx - fx) ** 2 + (gy - fy) ** 2) < self.min_goal_distance:
+                if math.sqrt((gx - fx) ** 2 + (gy - fy) ** 2) < self.blacklist_radius:
                     already_failed = True
                     break
             if already_failed:
                 continue
-            goals.append((score, gx, gy, size))
 
-        return goals
+            # Heading check: strict vs relaxed bucket
+            goal_dir = math.atan2(gy - ry, gx - rx)
+            heading_diff = abs(self.normalize_angle(goal_dir - ryaw))
+            if heading_diff <= self.max_heading_diff:
+                strict_goals.append((score, gx, gy, size))
+            else:
+                # Re-score without heading penalty for fair ranking
+                fallback_score = (size * self.size_weight
+                                 - dist * self.distance_weight)
+                relaxed_goals.append((fallback_score, gx, gy, size))
+
+        if strict_goals:
+            return strict_goals
+        if relaxed_goals:
+            self.get_logger().info(
+                f'No heading-feasible frontiers, relaxing heading constraint '
+                f'for {len(relaxed_goals)} behind-robot frontiers')
+            return relaxed_goals
+        return []
 
     def publish_markers(self, goals, selected_idx=-1):
         markers = MarkerArray()
@@ -451,6 +480,8 @@ class FrontierExplorer(Node):
             self.tried_centroids.clear()
             self.failed_centroids.clear()
             self.global_retry_count = 0
+            self.stuck_position = None
+            self.stuck_at_position_count = 0
         else:
             self.get_logger().warn(f'Goal failed with status {result.status}')
             if self.tried_centroids:
@@ -460,10 +491,30 @@ class FrontierExplorer(Node):
                 self.get_logger().info(
                     f'Blacklisted failed frontier ({fx:.2f}, {fy:.2f}), '
                     f'total blacklisted: {len(self.failed_centroids)}')
+            # Track position-level stuck
+            pose = self.get_robot_pose()
+            if pose:
+                self._update_stuck_position(pose)
         self.state = State.IDLE
 
     def feedback_callback(self, feedback_msg):
         pass
+
+    def _update_stuck_position(self, pose):
+        if pose is None:
+            return
+        if self.stuck_position is not None:
+            dx = pose[0] - self.stuck_position[0]
+            dy = pose[1] - self.stuck_position[1]
+            if math.sqrt(dx * dx + dy * dy) > 2.0:
+                self.stuck_position = None
+                self.stuck_at_position_count = 0
+                return
+        self.stuck_position = (pose[0], pose[1])
+        self.stuck_at_position_count += 1
+        self.get_logger().warn(
+            f'Stuck at position ({pose[0]:.2f}, {pose[1]:.2f}), '
+            f'count={self.stuck_at_position_count}/{self.stuck_position_count}')
 
     def _check_stuck(self):
         pose = self.get_robot_pose()
@@ -498,6 +549,8 @@ class FrontierExplorer(Node):
             if self.tried_centroids:
                 failed_goal = self.tried_centroids.pop()
                 self.failed_centroids.append(failed_goal)
+            # Track position-level stuck
+            self._update_stuck_position(pose)
             self.state = State.IDLE
         else:
             self.last_progress_pose = pose
@@ -552,6 +605,27 @@ class FrontierExplorer(Node):
             return
 
         self.consecutive_empty = 0
+
+        # Check position-level stuck
+        if self.stuck_at_position_count >= self.stuck_position_count:
+            self.get_logger().warn(
+                f'Stuck at same position for {self.stuck_at_position_count} '
+                f'consecutive goals, clearing blacklist for retry')
+            self.stuck_at_position_count = 0
+            self.stuck_position = None
+            self.failed_centroids.clear()
+            self.tried_centroids.clear()
+            self.global_retry_count += 1
+            if self.global_retry_count > self.max_global_retries:
+                self.get_logger().warn(
+                    'All retries exhausted at stuck position, '
+                    'declaring exploration complete')
+                self.state = State.COMPLETED
+                self.get_logger().info('=== EXPLORATION COMPLETE ===')
+                self.publish_markers([])
+                self.save_map()
+                return
+            return
 
         # Try best goals in order
         for i, (score, gx, gy, size) in enumerate(goals):

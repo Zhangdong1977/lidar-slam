@@ -137,29 +137,18 @@ def generate_launch_description():
         ],
     )
 
-    # 10. m-explore-ros2 frontier explorer (starts after TF is available)
-    explore_params = os.path.join(project_dir, 'config', 'explore_lite_params.yaml')
+    # 10. Custom frontier explorer with Ackermann heading awareness
+    frontier_explorer_params = os.path.join(
+        project_dir, 'config', 'frontier_explorer_params.yaml')
     frontier_explorer = Node(
-        package='explore_lite',
-        executable='explore',
-        name='explore_node',
+        package='lidar_slam_nodes',
+        executable='frontier_explorer',
+        name='frontier_explorer',
         output='screen',
         parameters=[
-            explore_params,
+            frontier_explorer_params,
             {'use_sim_time': True},
         ],
-        remappings=[
-            ('/tf', 'tf'),
-            ('/tf_static', 'tf_static'),
-        ],
-    )
-
-    # 10b. Map-saver watcher: auto-save on exploration completion
-    map_saver_watcher = Node(
-        package='lidar_slam_nodes',
-        executable='map_saver_watcher',
-        output='screen',
-        parameters=[{'use_sim_time': True}],
     )
 
     # 11. RViz2
@@ -191,7 +180,6 @@ def generate_launch_description():
                 target_action=wait_tf,
                 on_exit=[
                     frontier_explorer,
-                    map_saver_watcher,
                 ],
             ),
         ),

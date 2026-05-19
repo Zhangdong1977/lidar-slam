@@ -630,3 +630,206 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 | `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_nav2_bridge.py` | 桥接节点 |
 | `launch/sim_ackermann_opentcs.launch.py` | 集成 launch 文件（基于 sim_ackermann_nav + 桥接节点） |
 | `scripts/launch/sim_ackermann_opentcs.sh` | 启动脚本 |
+
+---
+
+## 十五、第十五轮 (2026-05-19)：修复探索永久卡死——黑名单失效 + 虚假碰撞
+
+### 概述
+
+机器人在 Gazebo 仿真中探索约 60 分钟后卡在 (6.77, -32.79)，日志显示 344 次连续 abort。
+根因：黑名单 middle/centroid 不匹配导致死循环 + `obstacle_min_range=0` 产生幽灵障碍物 +
+`minimum_turning_radius` 偏小 65% 导致规划路径不可执行。
+
+### 15.1 源码修复：黑名单 middle/centroid 不匹配
+
+**文件**: `third-party/m-explore-ros2/explore/src/explore.cpp` 第 428 行
+
+| 修改 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| ABORTED 分支黑名单存入点 | `frontier_goal`（= `frontier->middle`） | `prev_centroid_`（= `frontier->centroid`） | `goalOnBlacklist()` 检查的是 `f.centroid`，存 `middle` 导致永远匹配不上，同一不可达 frontier 被无限重选 |
+
+其他存入点已正确使用 `prev_centroid_`：第 252 行（progress timeout）、第 422 行（goal succeeded）。
+
+### 15.2 参数修复：消除虚假 "collision ahead"
+
+**文件**: `config/nav2_params_exploration.yaml`
+
+| 参数 | 位置 | 旧值 | 新值 | 原因 |
+|------|------|------|------|------|
+| `obstacle_min_range` | local costmap（第 98 行） | 0.0 | 0.5 | LiDAR 硬件最小量程 0.15m，设为 0 允许车身边缘回波/噪声被标记为障碍物，经 inflation 在 footprint 内产生 lethal cost，RPP 检查整个 footprint 不区分前后导致误报 |
+| `obstacle_min_range` | global costmap（第 133 行） | 0.0 | 0.5 | 同上 |
+| `minimum_turning_radius` | SmacPlannerHybrid（第 162 行） | 0.35 | 1.0 | 实际最小转弯半径 = wheel_base/tan(max_steer) = 0.58/tan(30°) = 1.004m，偏小 65% 导致规划路径包含机器人无法执行的急转弯 |
+
+### 15.3 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| `third-party/m-explore-ros2/explore/src/explore.cpp` | 黑名单 bug 修复 |
+| `config/nav2_params_exploration.yaml` | 三处参数调整 |
+| `log/explore_2026-05-19_15-42-25.log` | 问题日志 |
+
+---
+
+## 十六、第十六轮 (2026-05-19)：替换探索器为 Ackermann 感知版本，修复方向不在前进方向
+
+### 根因分析
+
+Ackermann 机器人在自动探索时频繁倒退或侧向移动。根因：
+
+1. **explore_lite 不考虑机器人朝向**：`orientation_scale: 0.0` 完全忽略机器人当前朝向，目标选择只看距离和面积
+2. **目标朝向始终为 identity (w=1.0)**：explore_lite 发给 Nav2 的目标姿态永远是朝东（heading=0°），无论机器人面朝哪里
+3. **SmacPlannerHybrid 允许倒车**：`REEDS_SHEPP` + `allow_reverse_expansion: true` + `reverse_penalty: 1.5`（过低），规划器对身后目标生成倒车路径
+4. **RPP 控制器执行倒车**：`allow_reversing: true` 使控制器执行倒车段
+
+项目中已有自定义 `frontier_explorer.py`（含朝向感知评分和 Ackermann 可行性过滤），但未被使用。
+
+### 16.1 启动文件修改
+
+**文件**: `launch/sim_ackermann_explore.launch.py`
+
+| 变更 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| 探索节点 | `explore_lite`（package=`explore_lite`, executable=`explore`） | `frontier_explorer`（package=`lidar_slam_nodes`, executable=`frontier_explorer`） | 使用 Ackermann 感知的自定义探索器，包含朝向评分和可行性过滤 |
+| 参数文件 | `config/explore_lite_params.yaml` | `config/frontier_explorer_params.yaml` | 新建专用参数配置 |
+| `map_saver_watcher` | 包含在 launch 中 | 移除 | `frontier_explorer.py` 内部已有 `save_map()` 方法，不需要外部 watcher。watcher 依赖 explore_lite 的 `/explore/status` 话题，新探索器不发布该话题 |
+
+### 16.2 新建参数配置
+
+**文件**: `config/frontier_explorer_params.yaml`
+
+```yaml
+frontier_explorer:
+  ros__parameters:
+    frontier_min_size: 20
+    size_weight: 1.0
+    distance_weight: 0.5
+    heading_weight: 2.0        # 朝向成本权重，惩罚非前方目标
+    max_goal_distance: 15.0
+    min_goal_distance: 1.0
+    max_heading_diff: 3.0       # ~172°, 拒绝几乎正后方的目标
+    explore_rate: 0.5
+    completion_check_count: 10
+    planning_retry_count: 5
+    max_global_retries: 1
+    min_free_cells: 500
+    stuck_timeout: 10.0
+    stuck_distance: 0.15
+    goal_obstacle_clearance: 0.6
+    initial_warmup_seconds: 10.0
+    nav2_wait_timeout: 120.0
+```
+
+### 16.3 Nav2 规划参数优化
+
+**文件**: `config/nav2_params_exploration.yaml`
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `planner_server.GridBased.reverse_penalty` | 1.5 | 5.0 | 大幅惩罚倒车路径，配合朝向感知的探索器减少不必要的倒车 |
+
+### 第十六轮 (2026-05-19)：替换探索器修复方向问题
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 机器人频繁倒退/侧向 | explore_lite 忽略朝向，目标朝向固定为东方 | 替换为 frontier_explorer（朝向评分 + Ackermann 可行性过滤） |
+| 倒车路径成本低 | reverse_penalty=1.5 倒车仅比前进贵 50% | reverse_penalty 提升至 5.0 |
+
+---
+
+## 十七、第十七轮 (2026-05-19)：修复位置级卡死——前沿方向过滤+黑名单+位置检测
+
+> 基于日志：`log/explore_2026-05-19_17-28-41.log`
+
+### 根因分析
+
+机器人成功完成 37 个目标后卡在 (30.91, -26.12)，连续 8 次尝试西侧前沿全部失败（移动仅 0-3mm）。三层叠加：
+
+1. **`max_heading_diff` 过宽**：3.0 弧度 = 171.9°，允许 160°~177° 的目标通过。Ackermann 无法高效到达身后 170°+ 的目标
+2. **黑名单距离过小**：`failed_centroids` 用 `min_goal_distance`(1.0m) 过滤，但卡住期间各前沿相距 7-13m，黑名单完全无效
+3. **无位置级卡住检测**：在同一位置反复尝试不同前沿，没有机制识别"这个位置已经无法继续"
+
+### 17.1 frontier_explorer.py 源码修改（第十七轮）
+
+| 变更 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `max_heading_diff` 默认值 | 3.0 | 2.5 | 3.0(172°) 允许几乎正后方的目标，2.5(143°) 拒绝需要大角度掉头的目标 |
+| 新增 `blacklist_radius` 参数 | — | 5.0m | 黑名单匹配距离从 1.0m 增大到 5.0m，同一区域不同前沿被归为同一不可达区域 |
+| 新增 `stuck_position_count` 参数 | — | 3 | 连续 3 个目标在同一位置失败时触发位置级卡住检测 |
+| 新增 `_update_stuck_position()` 方法 | — | 追踪连续失败的物理位置 | 位移 >2m 视为不同位置并重置计数 |
+| `explore_step()` 添加位置级检查 | — | 达到阈值后清黑名单重试 | 给被误判的前沿一次重新评估机会 |
+| `result_callback()` SUCCEEDED 重置 | — | 清零 `stuck_position` 和计数 | 成功导航后重置位置级追踪 |
+
+### 17.2 config/frontier_explorer_params.yaml（第十七轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `max_heading_diff` | 3.0 | 2.5 | ~143°，拒绝需要大角度掉头的目标 |
+| `blacklist_radius` | (新增) | 5.0 | 黑名单匹配半径，覆盖同一不可达区域的不同前沿 |
+| `stuck_position_count` | (新增) | 3 | 连续失败触发阈值 |
+
+### 第十七轮 (2026-05-19)：修复位置级卡死
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 极端角度目标 | 160°~177° 目标通过 Ackermann 过滤 | `max_heading_diff` 3.0→2.5 |
+| 黑名单无效 | 各前沿相距 7-13m，1.0m 黑名单无过滤 | `blacklist_radius` 5.0m |
+| 位置级循环 | 同一位置 8 次尝试不同前沿全部失败 | `_update_stuck_position` + `stuck_position_count=3` |
+
+---
+
+## 十八、第十八轮 (2026-05-19)：让 Nav2 BT 恢复动作有机会执行——增大 stuck_timeout
+
+### 根因分析
+
+frontier_explorer 的 `stuck_timeout=10s` 在 Nav2 完成恢复前就取消了目标。时间线冲突：
+
+| 组件 | 超时 | 动作 |
+|------|------|------|
+| frontier_explorer `stuck_timeout` | 10 秒 | 取消目标，换下一个前沿 |
+| Nav2 `progress_checker.movement_time_allowance` | 60 秒 | 报告无进展 |
+| Nav2 BT RecoveryNode | 6 轮 × ~20s | BackUp + ClearCostmap + Wait |
+
+frontier_explorer 10 秒就取消 → Nav2 的 BackUp 恢复动作**从未执行** → 机器人永远无法通过后退脱困。
+
+**正确分工**：后退恢复是 Nav2 BT 的工作。frontier_explorer 的 stuck 检测只是最终安全网，应等 Nav2 完成全部恢复尝试后再介入。
+
+### 18.1 config/frontier_explorer_params.yaml（第十八轮）
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `stuck_timeout` | 10.0 | 180.0 | 给 Nav2 足够时间完成完整恢复周期：progress_checker 60s + BT 6 轮恢复 × ~20s |
+| `stuck_distance` | 0.15 | 0.5 | 配合更长的超时，0.5m 表示机器人确实在移动（而非噪声） |
+
+### 第十八轮 (2026-05-19)：增大 stuck_timeout 让 Nav2 恢复生效
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| Nav2 BT 恢复被抢占 | stuck_timeout=10s 在 Nav2 BackUp 执行前取消目标 | stuck_timeout 增至 180s，让 Nav2 完成全部 6 轮恢复 |
+
+---
+
+## 十九、第十九轮 (2026-05-19)：朝向过滤器导致角落处过早宣布完成
+
+### 根因分析
+
+机器人在地图东北角 (48.27, 47.99) 完成最后一个目标后，面向角落墙壁。所有未探索前沿都在机器人身后（朝向差 >143°）。`max_heading_diff: 2.5`（≈143°）作为**硬过滤器**，把所有身后前沿全部剔除 → `find_frontiers()` 返回空 → 连续 10 次无前沿 → 错误宣布"探索完成"。
+
+实际上地图仍有一半区域未探索。
+
+### 19.1 frontier_explorer.py — 两轮过滤策略
+
+**代码改动**（`find_frontiers()` 方法）：
+
+旧逻辑：`is_ackermann_feasible()` 硬过滤所有朝向差 > `max_heading_diff` 的目标。
+
+新逻辑：分两个桶收集候选目标：
+1. **严格桶**（`strict_goals`）：朝向差 ≤ `max_heading_diff`（优先）
+2. **宽松桶**（`relaxed_goals`）：朝向差 > `max_heading_diff`，重算分数（去掉朝向惩罚）
+
+优先返回严格桶；如果严格桶为空，回退到宽松桶，并打印日志 `"No heading-feasible frontiers, relaxing heading constraint for N behind-robot frontiers"`。
+
+**效果**：
+- 正常情况下（前方有前沿）→ 行为不变，优先选择前方目标
+- 在角落/死胡同（前方无前沿）→ 放宽朝向约束，接受身后目标，让 SmacPlannerHybrid REEDS_SHEPP 规划掉头路径
+- 朝向仍通过 `heading_weight` 作为**评分偏好**，不会倒退到原来 explore_lite 的无朝向感知状态
