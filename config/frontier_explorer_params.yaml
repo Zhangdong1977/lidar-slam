@@ -4,13 +4,13 @@ frontier_explorer:
     size_weight: 1.0
     distance_weight: 0.5
     heading_weight: 2.0
-    max_goal_distance: 15.0
+    max_goal_distance: 35.0
     min_goal_distance: 1.0
     max_heading_diff: 2.5
     explore_rate: 0.5
-    completion_check_count: 10
+    completion_check_count: 20
     planning_retry_count: 5
-    max_global_retries: 1
+    max_global_retries: 3
     min_free_cells: 500
     stuck_timeout: 180.0
     stuck_distance: 0.5
@@ -19,3 +19,6 @@ frontier_explorer:
     nav2_wait_timeout: 120.0
     blacklist_radius: 5.0
     stuck_position_count: 3
+    long_range_enabled: true
+    long_range_min_cluster_size: 20
+    max_unknown_ratio: 0.05

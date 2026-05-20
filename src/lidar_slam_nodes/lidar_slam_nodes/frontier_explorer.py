@@ -54,6 +54,9 @@ class FrontierExplorer(Node):
         self.declare_parameter('nav2_wait_timeout', 120.0)
         self.declare_parameter('blacklist_radius', 5.0)
         self.declare_parameter('stuck_position_count', 3)
+        self.declare_parameter('long_range_enabled', True)
+        self.declare_parameter('long_range_min_cluster_size', 50)
+        self.declare_parameter('max_unknown_ratio', 0.15)
 
         self.frontier_min_size = self.get_parameter('frontier_min_size').value
         self.size_weight = self.get_parameter('size_weight').value
@@ -72,6 +75,9 @@ class FrontierExplorer(Node):
         self.nav2_wait_timeout = self.get_parameter('nav2_wait_timeout').value
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
         self.stuck_position_count = self.get_parameter('stuck_position_count').value
+        self.long_range_enabled = self.get_parameter('long_range_enabled').value
+        self.long_range_min_cluster_size = self.get_parameter('long_range_min_cluster_size').value
+        self.max_unknown_ratio = self.get_parameter('max_unknown_ratio').value
         completion_check_count = self.get_parameter('completion_check_count').value
         explore_rate = self.get_parameter('explore_rate').value
 
@@ -93,6 +99,8 @@ class FrontierExplorer(Node):
         # Position-level stuck detection
         self.stuck_position = None
         self.stuck_at_position_count = 0
+        self._long_range_goals = []
+        self._repositioning = False
 
         # Startup tracking
         self._start_time = self.get_clock().now()
@@ -355,7 +363,128 @@ class FrontierExplorer(Node):
                 f'No heading-feasible frontiers, relaxing heading constraint '
                 f'for {len(relaxed_goals)} behind-robot frontiers')
             return relaxed_goals
+
+        # Phase 2: long-range fallback — find distant frontier clusters
+        # and generate intermediate waypoints toward them
+        if self.long_range_enabled:
+            long_range = self._long_range_fallback(clusters, msg, rx, ry)
+            if long_range:
+                return long_range
+
         return []
+
+    def _long_range_fallback(self, clusters, msg, rx, ry):
+        """Find large frontier clusters beyond max_goal_distance.
+
+        Generates an intermediate waypoint at max_goal_distance in the direction
+        of the largest distant clusters, enabling the robot to backtrack toward
+        unexplored areas. Tries up to 3 clusters in descending size order.
+        """
+        grid = np.array(msg.data, dtype=np.int8).reshape(
+            (msg.info.height, msg.info.width))
+
+        large_clusters = sorted(
+            [c for c in clusters
+             if len(c) >= self.long_range_min_cluster_size],
+            key=len, reverse=True)
+        if not large_clusters:
+            return []
+
+        for cluster in large_clusters[:3]:
+            wxs = [self.cell_to_world(r, c, msg.info)[0] for r, c in cluster]
+            wys = [self.cell_to_world(r, c, msg.info)[1] for r, c in cluster]
+            target_x = sum(wxs) / len(wxs)
+            target_y = sum(wys) / len(wys)
+
+            dist = math.sqrt((target_x - rx) ** 2 + (target_y - ry) ** 2)
+            if dist <= self.max_goal_distance:
+                continue
+
+            direction = math.atan2(target_y - ry, target_x - rx)
+            wp_x = rx + self.max_goal_distance * math.cos(direction)
+            wp_y = ry + self.max_goal_distance * math.sin(direction)
+
+            snapped = self.snap_to_free(wp_x, wp_y, grid, msg.info, radius=20)
+            if snapped is None:
+                continue
+            wp_x, wp_y = snapped
+
+            wp_row, wp_col = self.world_to_cell(wp_x, wp_y, msg.info)
+            if not self.has_obstacle_clearance(
+                    wp_row, wp_col, grid, msg.info.height, msg.info.width,
+                    self.goal_obstacle_clearance, msg.info.resolution):
+                continue
+
+            self.get_logger().info(
+                f'Long-range fallback: cluster at ({target_x:.1f}, {target_y:.1f}) '
+                f'[size={len(cluster)}, dist={dist:.1f}m], '
+                f'waypoint ({wp_x:.1f}, {wp_y:.1f})')
+            return [(0.0, wp_x, wp_y, len(cluster))]
+
+        return []
+
+    def _reposition_to_frontiers(self):
+        """Navigate toward the weighted center of all remaining frontier clusters.
+
+        Called when no goals are available but unknown ratio is still high.
+        Moving the robot to a central location may reveal new frontiers.
+        Returns True if a repositioning goal was sent.
+        """
+        if self.current_map is None:
+            return False
+
+        msg = self.current_map
+        data = np.array(msg.data, dtype=np.int8)
+        height, width = msg.info.height, msg.info.width
+        grid = data.reshape((height, width))
+
+        frontier_mask = self.detect_frontiers(grid, height, width)
+        if not np.any(frontier_mask):
+            return False
+
+        clusters = self.cluster_frontiers(frontier_mask)
+        if not clusters:
+            return False
+
+        # Compute size-weighted centroid of all frontier clusters
+        total_weight = 0
+        weighted_x = 0.0
+        weighted_y = 0.0
+        for cells in clusters:
+            w = len(cells)
+            wxs = [self.cell_to_world(r, c, msg.info)[0] for r, c in cells]
+            wys = [self.cell_to_world(r, c, msg.info)[1] for r, c in cells]
+            weighted_x += sum(wxs) / len(wxs) * w
+            weighted_y += sum(wys) / len(wys) * w
+            total_weight += w
+
+        if total_weight == 0:
+            return False
+
+        target_x = weighted_x / total_weight
+        target_y = weighted_y / total_weight
+
+        # Snap to free cell
+        snapped = self.snap_to_free(target_x, target_y, grid, msg.info, radius=20)
+        if snapped is None:
+            return False
+        target_x, target_y = snapped
+
+        # Check obstacle clearance
+        trow, tcol = self.world_to_cell(target_x, target_y, msg.info)
+        if not self.has_obstacle_clearance(
+                trow, tcol, grid, height, width,
+                self.goal_obstacle_clearance, msg.info.resolution):
+            return False
+
+        self.get_logger().info(
+            f'Repositioning to frontier center ({target_x:.1f}, {target_y:.1f}) '
+            f'[{len(clusters)} clusters, {total_weight} frontier cells]')
+        self._repositioning = True
+        self.tried_centroids.append((target_x, target_y))
+        self.state = State.NAVIGATING
+        self.send_goal(target_x, target_y)
+        return True
 
     def publish_markers(self, goals, selected_idx=-1):
         markers = MarkerArray()
@@ -482,8 +611,13 @@ class FrontierExplorer(Node):
             self.global_retry_count = 0
             self.stuck_position = None
             self.stuck_at_position_count = 0
+            if self._repositioning:
+                self._repositioning = False
+                self.get_logger().info(
+                    'Repositioning complete, re-scanning for frontiers')
         else:
             self.get_logger().warn(f'Goal failed with status {result.status}')
+            self._repositioning = False
             if self.tried_centroids:
                 failed_goal = self.tried_centroids.pop()
                 self.failed_centroids.append(failed_goal)
@@ -589,6 +723,42 @@ class FrontierExplorer(Node):
             else:
                 return
 
+        # Check position-level stuck BEFORE frontier search — if the robot
+        # is physically stuck, finding frontiers is useless; reposition instead.
+        if self.stuck_at_position_count >= self.stuck_position_count:
+            self.get_logger().warn(
+                f'Stuck at same position for {self.stuck_at_position_count} '
+                f'consecutive goals, attempting recovery')
+            self.stuck_at_position_count = 0
+            self.stuck_position = None
+            self.failed_centroids.clear()
+            self.tried_centroids.clear()
+            self.global_retry_count += 1
+            if self.global_retry_count > self.max_global_retries:
+                # Before giving up, check if coverage is still insufficient
+                if self._unknown_ratio() > self.max_unknown_ratio:
+                    self.get_logger().warn(
+                        f'Stuck but coverage insufficient '
+                        f'({self._unknown_ratio():.1%} unknown), '
+                        f'resetting for repositioning attempt')
+                    self.global_retry_count = 0
+                    if self._reposition_to_frontiers():
+                        return
+                    # reposition failed, fall through to declare complete
+                else:
+                    self.get_logger().warn(
+                        'All retries exhausted at stuck position, '
+                        'declaring exploration complete')
+                self.state = State.COMPLETED
+                self.get_logger().info('=== EXPLORATION COMPLETE ===')
+                self.publish_markers([])
+                self.save_map()
+                return
+            # Try repositioning to frontier center to escape stuck position
+            if self._reposition_to_frontiers():
+                return
+            return
+
         goals = self.find_frontiers()
         self.publish_markers(goals, selected_idx=0 if goals else -1)
 
@@ -597,6 +767,21 @@ class FrontierExplorer(Node):
             self.get_logger().info(
                 f'No frontiers found ({self.consecutive_empty}/{self.completion_threshold})')
             if self.consecutive_empty >= self.completion_threshold:
+                # Coverage check: refuse to complete if too much unknown area remains
+                if self._unknown_ratio() > self.max_unknown_ratio:
+                    ratio = self._unknown_ratio()
+                    self.get_logger().warn(
+                        f'Map coverage insufficient: {ratio:.1%} unknown '
+                        f'(threshold {self.max_unknown_ratio:.0%}), '
+                        f'resetting completion counter')
+                    self.consecutive_empty = 0
+                    # Clear blacklist to give all frontiers another chance
+                    self.failed_centroids.clear()
+                    self.tried_centroids.clear()
+                    # Try repositioning toward remaining frontiers
+                    if self._reposition_to_frontiers():
+                        return
+                    return
                 self.state = State.COMPLETED
                 self.get_logger().info('=== EXPLORATION COMPLETE ===')
                 self.publish_markers([])
@@ -605,27 +790,6 @@ class FrontierExplorer(Node):
             return
 
         self.consecutive_empty = 0
-
-        # Check position-level stuck
-        if self.stuck_at_position_count >= self.stuck_position_count:
-            self.get_logger().warn(
-                f'Stuck at same position for {self.stuck_at_position_count} '
-                f'consecutive goals, clearing blacklist for retry')
-            self.stuck_at_position_count = 0
-            self.stuck_position = None
-            self.failed_centroids.clear()
-            self.tried_centroids.clear()
-            self.global_retry_count += 1
-            if self.global_retry_count > self.max_global_retries:
-                self.get_logger().warn(
-                    'All retries exhausted at stuck position, '
-                    'declaring exploration complete')
-                self.state = State.COMPLETED
-                self.get_logger().info('=== EXPLORATION COMPLETE ===')
-                self.publish_markers([])
-                self.save_map()
-                return
-            return
 
         # Try best goals in order
         for i, (score, gx, gy, size) in enumerate(goals):
@@ -654,6 +818,54 @@ class FrontierExplorer(Node):
             self.get_logger().info('=== EXPLORATION COMPLETE ===')
             self.publish_markers([])
             self.save_map()
+
+    def _unknown_ratio(self):
+        """Return the ratio of reachable unknown cells via flood-fill from robot."""
+        if self.current_map is None:
+            return 1.0
+        data = np.array(self.current_map.data, dtype=np.int8)
+        height = self.current_map.info.height
+        width = self.current_map.info.width
+        grid = data.reshape((height, width))
+
+        pose = self.get_robot_pose()
+        if pose is None:
+            return 1.0
+        rx, ry = pose[0], pose[1]
+        col = int((rx - self.current_map.info.origin.position.x)
+                  / self.current_map.info.resolution)
+        row = int((ry - self.current_map.info.origin.position.y)
+                  / self.current_map.info.resolution)
+
+        if not (0 <= row < height and 0 <= col < width
+                and grid[row, col] == 0):
+            return 1.0
+
+        visited = np.zeros((height, width), dtype=bool)
+        queue = deque([(row, col)])
+        visited[row, col] = True
+        reachable_free = 0
+        reachable_unknown = 0
+
+        while queue:
+            cy, cx = queue.popleft()
+            reachable_free += 1
+            for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                ny, nx = cy + dy, cx + dx
+                if not (0 <= ny < height and 0 <= nx < width):
+                    continue
+                if visited[ny, nx]:
+                    continue
+                visited[ny, nx] = True
+                if grid[ny, nx] == 0:
+                    queue.append((ny, nx))
+                elif grid[ny, nx] == -1:
+                    reachable_unknown += 1
+
+        total = reachable_free + reachable_unknown
+        if total == 0:
+            return 1.0
+        return reachable_unknown / total
 
     def save_map(self):
         import subprocess

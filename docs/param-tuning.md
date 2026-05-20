@@ -1,10 +1,5 @@
 # 自动探索建图参数调整记录
 
-> 调整日期：2026-05-16 (第一轮), 2026-05-18 (第二轮)  
-> 基于日志：`log/explore_2026-05-15_19-22-02.log`  
-> 问题摘要（第一轮）：探索过程中 279 次碰撞告警、45 次规划器超迭代、36 次 costmap 超时、34 次卡住，成功率仅 31%，最终地图仅 419×518 像素（约 21m×26m）  
-> 问题摘要（第二轮）：第一轮调整后机器人仍频繁撞击障碍物，导航路径未考虑激光雷达数据。根因分析发现 `obstacle_min_range` 设置过大导致近场障碍物被忽略
-
 ---
 
 ## 一、config/nav2_params_exploration.yaml
@@ -103,6 +98,25 @@
 | `collision_monitor.ros__parameters.FootprintApproach` | `time_before_collision` | `1.2` | `2.0` | **关键修复**：原值过于敏感，1.2s 预测碰撞导致大量误触发停车，延长到 2s 减少误报 |
 | `collision_monitor.ros__parameters.FootprintApproach` | `enabled` | `False` | `True` | **修复撞击**：启用基于 robot footprint 的预测性多边形碰撞检测，速度叠加后提前判断碰撞 |
 
+### 1.11 controller_server.goal_checker（第三轮追加）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `controller_server.ros__parameters.general_goal_checker` | `xy_goal_tolerance` | `0.1` | `0.5` | frontier 目标点位于已知/未知边界（靠近障碍物），0.1m 容忍要求机器人逼近障碍物。增大到 0.5m 使机器人在安全距离内即认为到达目标 |
+
+### 1.12 planner_server.GridBased（第三轮追加）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `planner_server.ros__parameters.GridBased` | `cost_penalty` | `8.0` | `15.0` | 增大代价惩罚因子，使 SmacPlannerHybrid 更积极地避开代价地图中的障碍物膨胀区，规划出的整条路径（含终点）离障碍物更远 |
+
+### 1.13 controller_server.progress_checker（第四轮追加）
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `controller_server.ros__parameters.progress_checker` | `required_movement_radius` | `0.15` | `0.3` | Ackermann 调头时位移极小（后轮小范围后退+前轮修正），0.15m 过于严格，增大到 0.3m 避免误判无进展 |
+| `controller_server.ros__parameters.progress_checker` | `movement_time_allowance` | `30.0` | `60.0` | Ackermann 倒车调头需要更长时间，30s 不够完成完整调头动作序列 |
+
 ---
 
 ## 二、config/ekf.yaml
@@ -129,7 +143,7 @@
 
 ---
 
-## 调整总结
+## 调整总结（第一、二轮）
 
 | 问题类别 | 日志表现 | 调整项数 | 核心改动 |
 |----------|----------|----------|----------|
@@ -150,44 +164,6 @@
 
 ---
 
-## 四、config/explore_lite_params.yaml
-
-### 4.1 frontier 代价函数（第三轮 2026-05-18）：修复机器人不走大片空地
-
-| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
-|----------|----------|------|------|----------|
-| `explore_node.ros__parameters` | `potential_scale` | `3.0` | `1.0` | 减小距离惩罚，使机器人愿意走更远去大片未知区域而非就近选小 frontier |
-| `explore_node.ros__parameters` | `gain_scale` | `1.0` | `2.5` | 增大面积奖励，大 frontier（空旷区域）获得更高优先级，优先探索开阔地带 |
-
-**根因分析**：frontier 代价函数 `cost = potential_scale × distance - gain_scale × size`。`potential_scale=3.0` 使距离权重远超大小权重，机器人偏好近处小 frontier（贴着障碍物边缘），而不是远处的大片空地 frontier。Nav2 收到这个贴着障碍物的目标点后只能规划出经过障碍物附近的路径，导致频繁卡住。
-
-### 第三轮 (2026-05-18)：修复机器人不走大片空地、路径贴障碍物
-
-| 问题类别 | 日志表现 | 调整项数 | 核心改动 |
-|----------|----------|----------|----------|
-| frontier 目标选择 | 机器人规避大片空地，路径贴着障碍物边缘，频繁卡住 | 4 项 | `potential_scale` 3.0→1.0, `gain_scale` 1.0→2.5, `xy_goal_tolerance` 0.1→0.5, `cost_penalty` 8.0→15.0 |
-
-### 1.11 controller_server.goal_checker（第三轮追加）
-
-| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
-|----------|----------|------|------|----------|
-| `controller_server.ros__parameters.general_goal_checker` | `xy_goal_tolerance` | `0.1` | `0.5` | frontier 目标点位于已知/未知边界（靠近障碍物），0.1m 容忍要求机器人逼近障碍物。增大到 0.5m 使机器人在安全距离内即认为到达目标 |
-
-### 1.12 planner_server.GridBased（第三轮追加）
-
-| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
-|----------|----------|------|------|----------|
-| `planner_server.ros__parameters.GridBased` | `cost_penalty` | `8.0` | `15.0` | 增大代价惩罚因子，使 SmacPlannerHybrid 更积极地避开代价地图中的障碍物膨胀区，规划出的整条路径（含终点）离障碍物更远 |
-
-### 1.13 controller_server.progress_checker（第四轮追加）
-
-| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
-|----------|----------|------|------|----------|
-| `controller_server.ros__parameters.progress_checker` | `required_movement_radius` | `0.15` | `0.3` | Ackermann 调头时位移极小（后轮小范围后退+前轮修正），0.15m 过于严格，增大到 0.3m 避免误判无进展 |
-| `controller_server.ros__parameters.progress_checker` | `movement_time_allowance` | `30.0` | `60.0` | Ackermann 倒车调头需要更长时间，30s 不够完成完整调头动作序列 |
-
----
-
 ## 四、behavior_trees/ackermann_nav.xml（第四轮 2026-05-18）
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
@@ -203,13 +179,13 @@
 | 调头后退距离不足 | 后轮小范围后退，无法腾出转弯空间 | 2 项 | `backup_dist` 1.5→2.5, 0.5→1.0 |
 | 进展检测过严 | progress timeout 触发前机器人实际在调头而非卡住 | 2 项 | `required_movement_radius` ↑, `movement_time_allowance` ↑ |
 
-**根因分析**：日志显示 "Passing new path to controller" 每 ~3.35s 触发一次，由行为树 `<RateController hz="0.3">` 控制。每次新路径到达都会重置 RPP 控制器的内部跟踪状态。Ackermann 车辆倒车调头需要连贯的 steering+throttle 序列，被频繁打断后表现为：后轮仅轻微后退、前轮反复修正、机器人原地调整方向。由于新路径持续到达，控制器的 progress_checker 也被反复重置不会报错，最终只能靠 explore 节点的 `progress_timeout`(90s) 超时取消。
+**根因分析**：日志显示 "Passing new path to controller" 每 ~3.35s 触发一次，由行为树 `<RateController hz="0.3">` 控制。每次新路径到达都会重置 RPP 控制器的内部跟踪状态。Ackermann 车辆倒车调头需要连贯的 steering+throttle 序列，被频繁打断后表现为：后轮仅轻微后退、前轮反复修正、机器人原地调整方向。
 
 ---
 
-## 五、第五轮 (2026-05-18)：修复规划器超迭代、大规模代价地图搜索失败
+## 五、config/nav2_params_exploration.yaml（第五轮 2026-05-18）：修复规划器超迭代
 
-### 5.1 planner_server.GridBased（第五轮）
+### 5.1 planner_server.GridBased
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
 |----------|----------|------|------|----------|
@@ -219,53 +195,52 @@
 | `planner_server.ros__parameters.GridBased` | `analytic_expansion_ratio` | `3.5` | `4.0` | 增大分析扩展比例，在开阔区域跳过多余的图搜索节点 |
 | `planner_server.ros__parameters.GridBased` | `analytic_expansion_max_length` | `3.0` | `5.0` | 增大分析扩展最大长度，在稀疏障碍物区域快速跳跃到目标方向 |
 
-### 第五轮 (2026-05-18)：修复规划器超迭代
+### 第五轮总结：修复规划器超迭代
 
 | 问题类别 | 日志表现 | 调整项数 | 核心改动 |
 |----------|----------|----------|----------|
-| 规划器超迭代 | "exceeded maximum iterations" 在 1507×1996 代价地图上反复失败，120 秒内 12 次规划全部失败，机器人长时间停止不动 | 5 项 | `downsample_costmap` 开启, `downsampling_factor` 2, `max_iterations` 翻倍, `analytic_expansion` 增大 |
-
----
-
-## 六、第六轮 (2026-05-18)：修复碰撞检测瘫痪——局部代价地图膨胀半径过大
-
-### 6.1 local_costmap.inflation_layer（第六轮）
-
-| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
-|----------|----------|------|------|----------|
-| `local_costmap.local_costmap.ros__parameters.inflation_layer` | `inflation_radius` | `1.5` | `0.6` | **核心修复**：1.5m 膨胀半径在 6×6m 局部代价地图中造成大面积致命代价区，RPP 碰撞检测（前视 0.75m）持续命中致命单元，导致机器人 0.4s 内触发 "Controller patience exceeded"，完全无法移动。0.6m = 车体半长 0.45 + 安全余量 0.15，足够安全 |
-
-### 第六轮 (2026-05-18)：修复碰撞检测瘫痪
-
-| 问题类别 | 日志表现 | 调整项数 | 核心改动 |
-|----------|----------|----------|----------|
-| 碰撞检测瘫痪 | "collision ahead!" 每 50ms 触发一次，0.4s 后 "Controller patience exceeded"，explore 反复选择同一 1.17m 外的 frontier，20+ 次连续失败，机器人完全不动 | 1 项 | local `inflation_radius` 1.5→0.6 |
-
-**根因分析**：碰撞检测本身正常工作——`max_allowed_time_to_collision_up_to_carrot: 3.0`（前视 0.75m）在检测到致命代价时正确触发警告。问题在于局部代价地图的 `inflation_radius: 1.5` 导致障碍物周围 1.5m 内布满膨胀代价，而 6×6m 窗口内几乎所有区域都被致命代价覆盖。当 frontier 目标仅 1.17m 远且位于已知/未知边界时，RPP 前视弧必然命中致命单元，控制器拒绝输出速度。第一轮曾将 local `inflation_radius` 从 1.0 降至 0.55，但后续被改回 1.5。0.6m 的膨胀半径（车体半长 0.45m + 0.15m 余量）在保证安全的同时，避免过度填充狭窄过道。
+| 规划器超迭代 | "exceeded maximum iterations" 在 1507×1996 代价地图上反复失败 | 5 项 | `downsample_costmap` 开启, `downsampling_factor` 2, `max_iterations` 翻倍, `analytic_expansion` 增大 |
 
 **根因分析**：代价地图扩张至 1507×1996 像素（约 75m×100m），SmacPlannerHybrid 使用 REEDS_SHEPP 运动模型 + 144 角度分箱，总状态数约 4.3 亿。100 万次迭代仅搜索了 0.23% 的状态空间。开启 2 倍降采样后状态数降至 1.1 亿，配合 200 万次迭代可探索约 1.8%。同时增大分析扩展参数使规划器在开阔区域快速跳过大片空白格子。
 
 ---
 
-## 七、第七轮 (2026-05-18)：修复 Start Occupied 死锁——机器人与障碍物碰撞后永久卡死
+## 六、config/nav2_params_exploration.yaml（第六轮 2026-05-18）：修复碰撞检测瘫痪
+
+### 6.1 local_costmap.inflation_layer
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `local_costmap.local_costmap.ros__parameters.inflation_layer` | `inflation_radius` | `1.5` | `0.6` | **核心修复**：1.5m 膨胀半径在 6×6m 局部代价地图中造成大面积致命代价区，RPP 碰撞检测（前视 0.75m）持续命中致命单元，导致机器人 0.4s 内触发 "Controller patience exceeded"，完全无法移动。0.6m = 车体半长 0.45 + 安全余量 0.15，足够安全 |
+
+### 第六轮总结：修复碰撞检测瘫痪
+
+| 问题类别 | 日志表现 | 调整项数 | 核心改动 |
+|----------|----------|----------|----------|
+| 碰撞检测瘫痪 | "collision ahead!" 每 50ms 触发一次，0.4s 后 "Controller patience exceeded"，机器人完全不动 | 1 项 | local `inflation_radius` 1.5→0.6 |
+
+**根因分析**：碰撞检测本身正常工作——`max_allowed_time_to_collision_up_to_carrot: 3.0`（前视 0.75m）在检测到致命代价时正确触发警告。问题在于局部代价地图的 `inflation_radius: 1.5` 导致障碍物周围 1.5m 内布满膨胀代价，而 6×6m 窗口内几乎所有区域都被致命代价覆盖。0.6m 的膨胀半径（车体半长 0.45m + 0.15m 余量）在保证安全的同时，避免过度填充狭窄过道。
+
+---
+
+## 七、behavior_trees + Nav2 参数（第七轮 2026-05-18）：修复 Start Occupied 死锁
 
 > 基于日志：`log/explore_2026-05-18_21-43-34.log`
 
 ### 根因分析
 
-机器人自主探索时与障碍物碰撞后永久卡死，循环报错 `Start occupied`（SmacPlannerHybrid 错误码 205）。问题分三层：
+机器人自主探索时与障碍物碰撞后永久卡死，循环报错 `Start occupied`（SmacPlannerHybrid 错误码 205）。问题分两层：
 
 1. **如何进入障碍物**：控制器检测到碰撞 → `failure_tolerance: 5.0` 允许 5 次连续失败 → 每次失败清除 local costmap → 机器人逐渐向前蠕动 → 最终物理上进入障碍物内部
 2. **为何无法恢复（核心 Bug）**：SmacPlannerHybrid 返回错误码 205（START_OCCUPIED），但 BT 的恢复门 `WouldAPlannerRecoveryHelp` 只检查 200/207/208 三个错误码，**不包含 205**。Fallback 门返回 FAILURE，整个恢复分支（包含 BackUp 倒车）被跳过
-3. **explore 雪上加霜**：explore 节点收到 ABORTED 后立即将 frontier 加入黑名单 → 选下一个 → 同样 Start occupied → 也被黑名单 → 最终所有 frontier 被黑名单 → 永久死锁
 
-### 7.1 behavior_trees/ackermann_nav.xml（第七轮）
+### 7.1 behavior_trees/ackermann_nav.xml
 
 | 参数位置 | 变更 | 调整原因 |
 |----------|------|----------|
 | 恢复门 Fallback | 添加 `AreErrorCodesPresent error_code="{compute_path_error_code}" error_codes_to_check="205;206"` | **核心修复**：START_OCCUPIED(205) 和 GOAL_OCCUPIED(206) 错误码被 WouldAPlannerRecoveryHelp 忽略，导致 BackUp 倒车恢复永远不执行 |
 
-### 7.2 config/nav2_params_exploration.yaml（第七轮）
+### 7.2 config/nav2_params_exploration.yaml
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
 |----------|----------|------|------|----------|
@@ -273,244 +248,30 @@
 | `local_costmap.local_costmap.ros__parameters.inflation_layer` | `inflation_radius` | `0.6` | `0.8` | 增大本地膨胀半径，提早避开障碍物 |
 | `local_costmap.local_costmap.ros__parameters.inflation_layer` | `cost_scaling_factor` | `2.0` | `3.0` | 配合更大膨胀半径，使代价衰减更陡峭 |
 
-### 7.3 explore_lite 源码修改（第七轮）
-
-| 文件 | 变更 | 调整原因 |
-|------|------|----------|
-| `explore.h` | 添加 `consecutive_aborts_` 计数器和 `kMaxConsecutiveAborts=5` 常量 | 替代立即黑名单的逻辑，允许 BT 有机会执行恢复 |
-| `explore.cpp reachedGoal()` | ABORTED 时递增计数器，仅连续 5 次 abort 后才黑名单 | 原代码首次 abort 即黑名单，导致 Start Occupied 时迅速耗尽所有 frontier |
-
 ---
 
-## 八、第八轮 (2026-05-18)：修复 explore 二进制未更新 + frontier 选择振荡
+## 八、Nav2 参数调整（第十轮 2026-05-19）：修复 Nav2 瞬间到达
 
-> 基于日志：`log/explore_2026-05-18_22-45-25.log`
-
-### 根因
-
-1. **旧二进制未编译**：上一轮 colcon build 未检测到源码变更，运行的是 5 月 16 日的旧二进制，包含源码中不存在的 "Frontier too close" 功能
-2. **centroid vs middle**：源码使用 `frontier->centroid`（常在机器人附近）而非 `frontier->middle`（更远的目标点），导致"瞬间到达"然后空等 progress_timeout
-3. **same_goal 阻塞**：目标成功后 `prev_goal_` 未重置，`same_goal` 检查阻止发送新目标
-4. **abort 振荡**：`planner_frequency=0.5`（每 2 秒重规划）导致每 4-6 秒 abort 当前导航，`kMaxConsecutiveAborts=5` 过低，正常重规划即触发黑名单 → 双向黑名单 → 远距离跳跃
-
-### 8.1 explore 源码修改（第八轮）
-
-| 文件 | 变更 | 调整原因 |
-|------|------|----------|
-| `explore.h` | `kMaxConsecutiveAborts` 5→20 | 允许更多正常重规划 abort，避免过早黑名单 |
-| `explore.cpp` | `frontier->centroid` → `frontier->middle` | 用中点（更远）而非质心（常在机器人附近）作为目标 |
-| `explore.cpp` | `RCLCPP_DEBUG` → `RCLCPP_INFO`（found frontiers, Sending goal） | 关键日志提升到 INFO 级别，便于调试 |
-| `explore.cpp` | 成功后重置 `prev_goal_` | 解除 same_goal 阻塞，允许发送新目标 |
-
-### 8.2 config/explore_lite_params.yaml（第八轮）
+### 8.1 config/nav2_params_exploration.yaml
 
 | 参数 | 旧值 | 新值 | 原因 |
 |------|------|------|------|
-| `planner_frequency` | 0.5 | 0.2 | 降低重规划频率（2s→5s），减少 abort 次数，给机器人更多时间完成当前导航 |
-| `potential_scale` | 1.0 | 2.0 | 增加距离惩罚，减少追逐远距离大 frontier 导致的方向跳跃 |
-| `gain_scale` | 2.5 | 2.0 | 略降低大小奖励，平衡距离和大小因素 |
-
-### 第八轮 (2026-05-18)：修复 explore 编译和 frontier 振荡
-
-| 问题类别 | 日志表现 | 核心改动 |
-|----------|----------|----------|
-| 旧二进制运行 | "Frontier too close" 消息不在源码中 | 强制清理 build/ 重新编译 |
-| 目标点过近 | centroid (0.01,-0.05) 即刻到达 | `frontier->centroid` → `frontier->middle` |
-| same_goal 阻塞 | 目标成功后 90 秒无新目标 | 成功后重置 `prev_goal_` |
-| abort 振荡 | 19m 跳跃 SE↔SW，双向黑名单 | `kMaxConsecutiveAborts` 5→20, `planner_frequency` 0.5→0.2, 代价权重调整 |
-
----
-
-## 九、第九轮 (2026-05-18)：修复 frontier 远距离跳跃 + 目标持久化
-
-> 基于日志：`log/explore_2026-05-18_22-54-25.log`
-
-### 根因
-
-1. **代价函数失衡**：`min_distance`（米，2-20）和 `size`（格数，3000-60000）都乘 resolution(0.05)，距离项 0.1-1.0 vs size 项 150-3000，差距 1000 倍。无论怎么调 potential_scale/gain_scale，大 frontier 永远赢
-2. **same_point 过严**：容差 0.01m，SLAM 更新使 frontier middle 移动 0.5-1.5m，导致同一 frontier 被识别为新目标 → abort 当前导航
-3. **prev_goal_ 重置**：上一轮添加的成功后重置导致 same_goal 检查失效
-
-### 9.1 源码修改（第九轮）
-
-| 文件 | 变更 | 调整原因 |
-|------|------|----------|
-| `explore.cpp same_point()` | 容差 0.01m → 2.0m | SLAM 更新使 frontier middle 移动 0.5-1.5m，2.0m 容差确保同一 frontier 不被 abort |
-| `explore.cpp reachedGoal()` | 移除成功后的 `prev_goal_` 重置 | 到达后 SLAM 更新会自然改变 frontier 排列，无需强制重置 |
-| `frontier_search.cpp frontierCost()` | 移除 `min_distance × resolution` | min_distance 已是米制，再乘 0.05 无意义。只对 size 乘 resolution 转 m² |
-
-### 9.2 参数调整（第九轮）
-
-| 参数 | 旧值 | 新值 | 原因 |
-|------|------|------|------|
-| `potential_scale` | 2.0 | 5.0 | 配合代价函数修复，距离惩罚生效（距离项 10-100 vs size 项 100-3000） |
-| `gain_scale` | 2.0 | 1.0 | 降低 size 权重，平衡距离 |
-
-### 第九轮 (2026-05-18)：修复 frontier 远距离跳跃
-
-| 问题类别 | 日志表现 | 核心改动 |
-|----------|----------|----------|
-| 代价函数失衡 | 远 17m frontier(size=6567) 总赢近 5m(size=3000) | 移除 distance × resolution，增大 potential_scale |
-| 重规划 abort | 每 5 秒 abort 切换方向 | same_point 容差 0.01→2.0m + 恢复 prev_goal_ |
-
-### 9.3 时间源崩溃修复（第九轮续）
-
-**现象**：explore 节点启动后立即崩溃：`std::runtime_error: can't subtract times with different time sources [1 != 2]`
-
-**根因**：`last_progress_`（`rclcpp::Time`）默认构造使用 RCL_ROS_TIME (source=1)，但 `use_sim_time: True` 时 `this->now()` 返回 SIM_TIME (source=2)。在 `makePlan()` 中 `this->now() - last_progress_` 减法要求同一时间源。
-
-**修复**：添加 `bool progress_initialized_` 标志，首次成功赋值 `last_progress_` 时才设为 true，超时检查仅在已初始化时执行：
-
-| 文件 | 改动 | 说明 |
-|------|------|------|
-| `explore.h` | 添加 `bool progress_initialized_ = false` | 新增标志位 |
-| `explore.cpp makePlan()` | 赋值分支添加 `progress_initialized_ = true` | 首次赋值标记 |
-| `explore.cpp makePlan()` | 超时检查前置 `progress_initialized_ &&` | 避免未初始化时做时间减法 |
-
-### 9.4 首个目标被 same_goal 吞掉（第九轮续）
-
-**现象**：explore 每 5 秒找到同一 frontier 但从不发送导航目标，机器人静止不动
-
-**根因**：`prev_goal_` 初始值 (0,0,0) 与第一个 frontier middle (-1.05, 1.04) 距离 1.48m < same_point 容差 2.0m，被误判为"同一目标"跳过
-
-**修复**：添加 `bool first_goal_sent_ = false`，`same_goal = first_goal_sent_ && same_point(...)`，发送目标后设 `first_goal_sent_ = true`
-
-### 9.5 引入 navigating_ 状态锁（第九轮最终修复）
-
-**现象**：机器人导航到 frontier A 途中，SLAM 发现更大的 frontier B（代价更低），timer 触发 makePlan() 后发送新目标到 B，Nav2 preempts 当前导航，机器人转向
-
-**根因**：`same_point` 机制只能阻止发送**同一个** frontier（距离 < 2.0m），**完全无法阻止**发送一个**不同的** frontier。代码中没有任何"机器人是否正在导航"的状态追踪
-
-**修复**：用 `bool navigating_` 标志替代整个 `same_goal`/`same_point` 机制：
-
-| 位置 | 改动 |
-|------|------|
-| `explore.h` | `navigating_` 替换 `first_goal_sent_`，移除 same_goal 相关逻辑 |
-| `makePlan()` 开头 | `navigating_==true` 时只检查 progress timeout（用机器人到目标的距离），不搜索新 frontier |
-| `makePlan()` 发送目标时 | 设置 `navigating_=true`、`prev_goal_`、`prev_distance_`、`last_progress_` |
-| `reachedGoal()` | 所有分支开头设 `navigating_=false` |
-| `stop()` | 设 `navigating_=false` |
-
-**行为变化**：
-- 导航中 timer 触发 → 只检查是否卡住，不做 frontier 搜索，不发新目标
-- 到达目标(SUCCEEDED) → navigating_=false → makePlan() 搜索新 frontier 并发送
-- 卡住超时(90s) → cancel 当前目标、blacklist、navigating_=false → 搜索新 frontier
-- ABORTED → navigating_=false → 等 timer 触发时自动搜索新 frontier
-
----
-
-## 十、第十轮 (2026-05-19)：修复机器人卡死——无限循环发送同一目标点
-
-> 基于日志：`log/explore_2026-05-19_09-19-22.log`
-
-### 根因分析
-
-机器人探索时卡死，explore节点每 0.5 秒循环：发送目标 → Nav2 瞬间"到达" → 再次选同一frontier → 重复 596 次。
-
-**四个叠加的bug：**
-
-1. **`gain_scale=1.0` 使巨型frontier永远被选中**：代价公式 `cost = potential_scale × min_distance - gain_scale × size × resolution`，frontier 0 (size=10430) 的 cost=-517.6，其他frontier均为正值(60+)，永远排第一
-2. **Nav2瞬间判定到达**：规划器 tolerance=2.0m，目标距机器人仅 0.78m，控制器 0.2ms 内报告 "Reached the goal!"
-3. **成功到达后不加黑名单**：`reachedGoal(SUCCEEDED)` 只调用 `makePlan()`，不加黑名单
-4. **黑名单逻辑不一致**：存储的是 middle 点(-38.97, 7.07)，检查的是 centroid(-43.72, 14.25)，两者相距 7.8m，黑名单永远匹配不上
-
-### 10.1 explore 源码修改（第十轮）
-
-| 文件 | 变更 | 调整原因 |
-|------|------|----------|
-| `explore.h` | 添加 `geometry_msgs::msg::Point prev_centroid_` 成员 | 存储 frontier 质心，用于正确的黑名单匹配 |
-| `explore.cpp makePlan()` | frontier 选择条件添加 `f.min_distance < 1.0` 跳过太近的frontier | 距机器人<1.0m 的 frontier 的 middle 点已在脚下，Nav2 瞬间判定到达 |
-| `explore.cpp makePlan()` | 添加 `prev_centroid_ = frontier->centroid` | 存储质心供黑名单使用 |
-| `explore.cpp reachedGoal()` | SUCCEEDED 分支添加 `frontier_blacklist_.push_back(prev_centroid_)` | 成功到达后加黑名单，防止重复选择同一 frontier |
-| `explore.cpp makePlan()` progress timeout | `frontier_blacklist_.push_back(prev_goal_)` → `prev_centroid_` | 修复黑名单：用 centroid 而非 middle 存储，与 `goalOnBlacklist(f.centroid)` 检查一致 |
-
-### 10.2 config/explore_lite_params.yaml（第十轮）
-
-| 参数 | 旧值 | 新值 | 原因 |
-|------|------|------|------|
-| `gain_scale` | 1.0 | 0.5 | 降低巨型 frontier 的支配力，让距离因素更重要。frontier 0(size=10430) 的 size 项从 521.5 降至 260.8 |
-
-### 10.3 config/nav2_params_exploration.yaml（第十轮）
-
-| 参数 | 旧值 | 新值 | 原因 |
-|------|------|------|------|
-| `planner_server.GridBased.tolerance` | 2.0 | 0.75 | 规划器容差过大导致 0.78m 外的目标被瞬间"到达"，降至 0.75m 迫使规划器创建实际路径 |
+| `planner_server.GridBased.tolerance` | 2.0 | 0.75 | 规划器容差过大导致近距离目标被瞬间"到达"，降至 0.75m 迫使规划器创建实际路径 |
 | `controller_server.general_goal_checker.xy_goal_tolerance` | 0.5 | 0.35 | 更严格的目标到达判定，配合缩小的规划容差 |
 
-### 第十轮 (2026-05-19)：修复机器人卡死无限循环
+### 第十轮总结
 
-| 问题类别 | 日志表现 | 核心改动 |
-|----------|----------|----------|
-| 同一frontier被重复选择 | 596次发送同一目标(-38.97, 7.07) | 成功后加黑名单(用centroid)、最小距离过滤(<1.0m跳过)、gain_scale降低 |
-| Nav2瞬间到达 | 控制器0.2ms报告"Reached the goal!" | planner tolerance 2.0→0.75, xy_goal_tolerance 0.5→0.35 |
-| 黑名单失效 | centroid与middle相差7.8m，永远匹配不上 | 黑名单存储改为用centroid |
+| 问题类别 | 核心改动 |
+|----------|----------|
+| Nav2 瞬间到达 | planner tolerance 2.0→0.75, xy_goal_tolerance 0.5→0.35 |
 
 ---
 
-## 十一、第十一轮 (2026-05-19)：修复同一 frontier 因黑名单容忍度过小被重复选择
-
-> 基于日志：`log/explore_2026-05-19_09-45-17.log`
-
-### 根因分析
-
-机器人探索时卡死，614 次发送同一目标 (-32.23, -28.47)，机器人完全不移动。三层叠加：
-
-1. **二进制未更新（主因）**：源码最后修改 09:42，编译二进制停留在 18 日 23:26。第十轮的 `min_distance < 1.0` 过滤器和 `prev_centroid_` 黑名单修复未编译进运行中的二进制
-2. **黑名单容忍度过小**：`goalOnBlacklist()` 使用 `5 × resolution = 0.25m` 容忍度匹配质心。同一物理 frontier 在 SLAM 更新后质心偏移 0.5-0.75m（如 (-39.45,-19.34)→(-40.09,-19.02)），远超 0.25m 阈值，黑名单形同虚设
-3. **巨型 frontier 支配**：frontier 0 (size=7561) 代价 cost=-186，远超其他 frontier（frontier 1 cost=-175），始终被选中
-
-### 11.1 explore 源码修改（第十一轮）
-
-| 文件 | 变更 | 调整原因 |
-|------|------|----------|
-| `explore.cpp goalOnBlacklist()` | `tolerace` 5→40 (0.25m→2.0m) | 同一 frontier 质心在 SLAM 更新间偏移 0.5-0.75m，0.25m 容忍度无法匹配。2.0m 覆盖质心偏移且不误匹配不同 frontier（间距通常 >5m） |
-
-### 11.2 编译修复（第十一轮）
-
-| 操作 | 说明 |
-|------|------|
-| `colcon build --packages-select explore_lite --cmake-clean-cache` | 强制完全重编译，确保第十轮和第十一轮的所有源码修改生效 |
-
-### 第十一轮 (2026-05-19)：修复黑名单容忍度过小
-
-| 问题类别 | 日志表现 | 核心改动 |
-|----------|----------|----------|
-| 同一 frontier 被重复选择 | 614 次发送 (-32.23, -28.47)，机器人静止 | 黑名单容忍度 0.25m→2.0m、重编译 |
-| 二进制未更新 | 源码比二进制新 10 小时 | `--cmake-clean-cache` 强制重编译 |
-
----
-
-## 十二、第十二轮 (2026-05-19)：减少自动探索碰撞——双层修复
+## 九、Nav2 参数调整（第十二轮 2026-05-19）：减少自动探索碰撞
 
 > 基于日志：`log/explore_2026-05-19_11-16-55.log`
 
-### 根因分析
-
-11 分钟运行中：562 次碰撞检测、47 次导航中止、35 次规划器超迭代、13 次后退失败，最终卡死。
-
-**双重根因**：
-1. **Nav2 参数**：local inflation_radius=0.8 + cost_scaling_factor=3.0 保护带过窄；velocity_smoother 峰值速度 1.0 m/s 制动距离过长；控制器 transform_tolerance=2.0 允许过时 TF
-2. **Explore 源码**：frontier 目标选择时没有检查与已知障碍物的距离，导航目标点可能紧贴墙壁/障碍物
-
-### 12.1 explore 源码修改（第十二轮）
-
-| 文件 | 变更 | 调整原因 |
-|------|------|----------|
-| `explore.h` | 添加 `bool isTooCloseToObstacle(const Point& point)` 方法声明 | 新增障碍物距离检查 |
-| `explore.h` | 添加 `double min_obstacle_distance_` 成员变量 | 可配置的最小障碍物距离阈值 |
-| `explore.cpp` 构造函数 | 声明和获取 `min_obstacle_distance` 参数（默认 0.75m） | 通过 YAML 配置，无需重编译即可调整 |
-| `explore.cpp` | 实现 `isTooCloseToObstacle()`：在目标点周围圆形区域内搜索 LETHAL_OBSTACLE 单元格 | 使用 SLAM 原始地图（无膨胀），检查真实障碍物位置 |
-| `explore.cpp` makePlan() | 过滤条件添加 `isTooCloseToObstacle(f.middle)` | 跳过导航目标点周围 0.75m 内有障碍物的 frontier |
-
-**性能**：0.75m / 0.05m = 15 格半径，31×31 = 961 单元格/frontier。100 个 frontier × 961 ≈ 96K 查询/5 秒，< 1ms。
-
-### 12.2 config/explore_lite_params.yaml（第十二轮）
-
-| 参数 | 旧值 | 新值 | 原因 |
-|------|------|------|------|
-| `min_obstacle_distance` | (新增) | `0.75` | frontier 导航目标点到最近障碍物的最小允许距离。机器人 footprint 最远端 0.45m，留 0.30m 安全余量 |
-
-### 12.3 config/nav2_params_exploration.yaml（第十二轮）
+### 9.1 config/nav2_params_exploration.yaml
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
 |----------|----------|------|------|----------|
@@ -526,18 +287,18 @@
 | `velocity_smoother` | `velocity_timeout` | `2.0` | `1.0` | 惯性滑行从 2 秒降至 1 秒 |
 | `collision_monitor.FootprintApproach` | `time_before_collision` | `2.0` | `1.5` | 配合降速后的 max_velocity=0.5 |
 
-### 第十二轮 (2026-05-19)：减少自动探索碰撞
+### 第十二轮总结
 
 | 问题类别 | 日志表现 | 调整项数 | 核心改动 |
 |----------|----------|----------|----------|
-| 碰撞检测频繁 | 562 次 "detected collision ahead" | 10 项参数 + 1 项源码 | inflation_radius ↑, cost_scaling_factor ↓, max_velocity ↓, 新增 isTooCloseToObstacle 过滤 |
-| 导航频繁中止 | 47 次 abort，3 次黑名单 | 间接改善 | 控制器参数收紧 + frontier 障碍物距离过滤 |
-| 规划器超迭代 | 35 次超迭代，目标不可达 | 间接改善 | global obstacle_min_range 归零 |
+| 碰撞检测频繁 | 562 次 "detected collision ahead" | 11 项参数 | inflation_radius ↑, cost_scaling_factor ↓, max_velocity ↓, obstacle_min_range 调整 |
+| 导航频繁中止 | 47 次 abort | 间接改善 | 控制器参数收紧 |
+| 规划器超迭代 | 35 次超迭代 | 间接改善 | global obstacle_min_range 归零 |
 | 后退恢复失败 | 13 次 backup failed | 间接改善 | 碰撞减少后触发次数降低 |
 
 ---
 
-## 十三、第十三轮 (2026-05-19)：优化 Ackermann 脱困/调头行为——消除前后振荡
+## 十、behavior_trees + Nav2 参数（第十三轮 2026-05-19）：优化 Ackermann 脱困/调头行为
 
 > 问题：脱困和调头时前后移动幅度过小，频繁前进后退振荡
 
@@ -547,7 +308,7 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 
 同时 `regulated_linear_scaling_min_speed=0.05` 和 `min_approach_linear_velocity=0.08` 导致在障碍物附近以极低速度蠕行（实际≈不动），`cost_scaling_factor=2.0` 使代价衰减不够快，大面积高代价区域持续降速。
 
-### 13.1 config/nav2_params_exploration.yaml（第十三轮）
+### 10.1 config/nav2_params_exploration.yaml
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
 |----------|----------|------|------|----------|
@@ -558,7 +319,7 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 | `global_costmap.inflation_layer` | `cost_scaling_factor` | `2.0` | `4.0` | 同上，全局代价地图也加速衰减 |
 | `planner_server.GridBased` | `reverse_penalty` | `2.0` | `1.5` | 降低倒车惩罚，鼓励规划出连贯的倒车调头路径而非多次方向切换 |
 
-### 13.2 config/nav2_params_ackermann.yaml（第十三轮）
+### 10.2 config/nav2_params_ackermann.yaml
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
 |----------|----------|------|------|----------|
@@ -568,7 +329,7 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 | `local_costmap.inflation_layer` | `cost_scaling_factor` | `1.0` | `2.0` | 加速代价衰减，减少减速区域 |
 | `global_costmap.inflation_layer` | `cost_scaling_factor` | `1.5` | `3.0` | 同上 |
 
-### 13.3 behavior_trees/ackermann_nav.xml（第十三轮）
+### 10.3 behavior_trees/ackermann_nav.xml
 
 | 参数位置 | 变更 | 调整原因 |
 |----------|------|----------|
@@ -577,7 +338,7 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 | `BackUp` 第二个 | `backup_dist=1.0, backup_speed=0.2` → `backup_dist=2.0, backup_speed=0.3` | 同上 |
 | `Wait` | `wait_duration=3` → `wait_duration=2` | 减少无效等待时间 |
 
-### 第十三轮 (2026-05-19)：优化 Ackermann 脱困/调头行为
+### 第十三轮总结：优化 Ackermann 脱困/调头行为
 
 | 问题类别 | 日志表现 | 调整项数 | 核心改动 |
 |----------|----------|----------|----------|
@@ -587,13 +348,13 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 
 ---
 
-## 十四、openTCS 集成参数（2026-05-19）
+## 十一、openTCS 集成参数（2026-05-19）
 
 ### 概述
 
 新增 `opentcs_nav2_bridge` 桥接节点，将 openTCS-NeNa 调度系统的 topic 接口与 Nav2 NavigateToPose action 对接。
 
-### 14.1 桥接节点参数 (`opentcs_nav2_bridge`)
+### 11.1 桥接节点参数 (`opentcs_nav2_bridge`)
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
@@ -604,14 +365,14 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 | `source_frame` | `body_link` | TF 源帧 |
 | `pose_publish_rate` | `10.0` | 位置发布频率 Hz，10Hz 足以满足调度系统跟踪需求 |
 
-### 14.2 DDS 兼容性配置
+### 11.2 DDS 兼容性配置
 
 | 环境变量 | 值 | 说明 |
 |----------|-----|------|
 | `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | 与 openTCS-NeNa IHMC Fast-RTPS 对齐，确保 DDS 发现兼容 |
 | `ROS_DOMAIN_ID` | `42` | 当前环境默认值 42，openTCS-NeNa 默认=30，需在 Kernel Control Center 中改为 42 |
 
-### 14.3 工厂世界关键坐标参考
+### 11.3 工厂世界关键坐标参考
 
 充电站位置（来自 factory.sdf）：
 | 名称 | ROS2 (x, y) m |
@@ -623,7 +384,7 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 | charger_5 | (41, 44) |
 | charger_6 | (44, 44) |
 
-### 14.4 相关文件
+### 11.4 相关文件
 
 | 文件 | 说明 |
 |------|------|
@@ -633,68 +394,44 @@ Ackermann 小车遇到死胡同或需要调头时，RPP 控制器（`allow_rever
 
 ---
 
-## 十五、第十五轮 (2026-05-19)：修复探索永久卡死——黑名单失效 + 虚假碰撞
+## 十二、Nav2 参数修复（第十五轮 2026-05-19）：消除虚假碰撞
 
-### 概述
-
-机器人在 Gazebo 仿真中探索约 60 分钟后卡在 (6.77, -32.79)，日志显示 344 次连续 abort。
-根因：黑名单 middle/centroid 不匹配导致死循环 + `obstacle_min_range=0` 产生幽灵障碍物 +
-`minimum_turning_radius` 偏小 65% 导致规划路径不可执行。
-
-### 15.1 源码修复：黑名单 middle/centroid 不匹配
-
-**文件**: `third-party/m-explore-ros2/explore/src/explore.cpp` 第 428 行
-
-| 修改 | 旧值 | 新值 | 原因 |
-|------|------|------|------|
-| ABORTED 分支黑名单存入点 | `frontier_goal`（= `frontier->middle`） | `prev_centroid_`（= `frontier->centroid`） | `goalOnBlacklist()` 检查的是 `f.centroid`，存 `middle` 导致永远匹配不上，同一不可达 frontier 被无限重选 |
-
-其他存入点已正确使用 `prev_centroid_`：第 252 行（progress timeout）、第 422 行（goal succeeded）。
-
-### 15.2 参数修复：消除虚假 "collision ahead"
+### 12.1 参数修复
 
 **文件**: `config/nav2_params_exploration.yaml`
 
 | 参数 | 位置 | 旧值 | 新值 | 原因 |
 |------|------|------|------|------|
-| `obstacle_min_range` | local costmap（第 98 行） | 0.0 | 0.5 | LiDAR 硬件最小量程 0.15m，设为 0 允许车身边缘回波/噪声被标记为障碍物，经 inflation 在 footprint 内产生 lethal cost，RPP 检查整个 footprint 不区分前后导致误报 |
-| `obstacle_min_range` | global costmap（第 133 行） | 0.0 | 0.5 | 同上 |
-| `minimum_turning_radius` | SmacPlannerHybrid（第 162 行） | 0.35 | 1.0 | 实际最小转弯半径 = wheel_base/tan(max_steer) = 0.58/tan(30°) = 1.004m，偏小 65% 导致规划路径包含机器人无法执行的急转弯 |
-
-### 15.3 相关文件
-
-| 文件 | 说明 |
-|------|------|
-| `third-party/m-explore-ros2/explore/src/explore.cpp` | 黑名单 bug 修复 |
-| `config/nav2_params_exploration.yaml` | 三处参数调整 |
-| `log/explore_2026-05-19_15-42-25.log` | 问题日志 |
+| `obstacle_min_range` | local costmap | 0.0 | 0.5 | LiDAR 硬件最小量程 0.15m，设为 0 允许车身边缘回波/噪声被标记为障碍物，经 inflation 在 footprint 内产生 lethal cost，RPP 检查整个 footprint 不区分前后导致误报 |
+| `obstacle_min_range` | global costmap | 0.0 | 0.5 | 同上 |
+| `minimum_turning_radius` | SmacPlannerHybrid | 0.35 | 1.0 | 实际最小转弯半径 = wheel_base/tan(max_steer) = 0.58/tan(30°) = 1.004m，偏小 65% 导致规划路径包含机器人无法执行的急转弯 |
 
 ---
 
-## 十六、第十六轮 (2026-05-19)：替换探索器为 Ackermann 感知版本，修复方向不在前进方向
+## 十三、替换探索器为 Ackermann 感知版本（第十六轮 2026-05-19）
 
 ### 根因分析
 
 Ackermann 机器人在自动探索时频繁倒退或侧向移动。根因：
 
-1. **explore_lite 不考虑机器人朝向**：`orientation_scale: 0.0` 完全忽略机器人当前朝向，目标选择只看距离和面积
-2. **目标朝向始终为 identity (w=1.0)**：explore_lite 发给 Nav2 的目标姿态永远是朝东（heading=0°），无论机器人面朝哪里
+1. **旧探索器不考虑机器人朝向**：`orientation_scale: 0.0` 完全忽略机器人当前朝向，目标选择只看距离和面积
+2. **目标朝向始终为 identity (w=1.0)**：旧探索器发给 Nav2 的目标姿态永远是朝东（heading=0°），无论机器人面朝哪里
 3. **SmacPlannerHybrid 允许倒车**：`REEDS_SHEPP` + `allow_reverse_expansion: true` + `reverse_penalty: 1.5`（过低），规划器对身后目标生成倒车路径
 4. **RPP 控制器执行倒车**：`allow_reversing: true` 使控制器执行倒车段
 
-项目中已有自定义 `frontier_explorer.py`（含朝向感知评分和 Ackermann 可行性过滤），但未被使用。
+替换为自定义 `frontier_explorer.py`（含朝向感知评分和 Ackermann 可行性过滤）。
 
-### 16.1 启动文件修改
+### 13.1 启动文件修改
 
 **文件**: `launch/sim_ackermann_explore.launch.py`
 
 | 变更 | 旧值 | 新值 | 原因 |
 |------|------|------|------|
-| 探索节点 | `explore_lite`（package=`explore_lite`, executable=`explore`） | `frontier_explorer`（package=`lidar_slam_nodes`, executable=`frontier_explorer`） | 使用 Ackermann 感知的自定义探索器，包含朝向评分和可行性过滤 |
+| 探索节点 | `explore_lite` | `frontier_explorer` | 使用 Ackermann 感知的自定义探索器，包含朝向评分和可行性过滤 |
 | 参数文件 | `config/explore_lite_params.yaml` | `config/frontier_explorer_params.yaml` | 新建专用参数配置 |
-| `map_saver_watcher` | 包含在 launch 中 | 移除 | `frontier_explorer.py` 内部已有 `save_map()` 方法，不需要外部 watcher。watcher 依赖 explore_lite 的 `/explore/status` 话题，新探索器不发布该话题 |
+| `map_saver_watcher` | 包含在 launch 中 | 移除 | `frontier_explorer.py` 内部已有 `save_map()` 方法，不需要外部 watcher |
 
-### 16.2 新建参数配置
+### 13.2 新建参数配置
 
 **文件**: `config/frontier_explorer_params.yaml`
 
@@ -720,7 +457,7 @@ frontier_explorer:
     nav2_wait_timeout: 120.0
 ```
 
-### 16.3 Nav2 规划参数优化
+### 13.3 Nav2 规划参数优化
 
 **文件**: `config/nav2_params_exploration.yaml`
 
@@ -728,16 +465,16 @@ frontier_explorer:
 |------|------|------|------|
 | `planner_server.GridBased.reverse_penalty` | 1.5 | 5.0 | 大幅惩罚倒车路径，配合朝向感知的探索器减少不必要的倒车 |
 
-### 第十六轮 (2026-05-19)：替换探索器修复方向问题
+### 第十六轮总结
 
 | 问题类别 | 日志表现 | 核心改动 |
 |----------|----------|----------|
-| 机器人频繁倒退/侧向 | explore_lite 忽略朝向，目标朝向固定为东方 | 替换为 frontier_explorer（朝向评分 + Ackermann 可行性过滤） |
+| 机器人频繁倒退/侧向 | 旧探索器忽略朝向，目标朝向固定为东方 | 替换为 frontier_explorer（朝向评分 + Ackermann 可行性过滤） |
 | 倒车路径成本低 | reverse_penalty=1.5 倒车仅比前进贵 50% | reverse_penalty 提升至 5.0 |
 
 ---
 
-## 十七、第十七轮 (2026-05-19)：修复位置级卡死——前沿方向过滤+黑名单+位置检测
+## 十四、frontier_explorer 参数优化（第十七轮 2026-05-19）：修复位置级卡死
 
 > 基于日志：`log/explore_2026-05-19_17-28-41.log`
 
@@ -749,7 +486,7 @@ frontier_explorer:
 2. **黑名单距离过小**：`failed_centroids` 用 `min_goal_distance`(1.0m) 过滤，但卡住期间各前沿相距 7-13m，黑名单完全无效
 3. **无位置级卡住检测**：在同一位置反复尝试不同前沿，没有机制识别"这个位置已经无法继续"
 
-### 17.1 frontier_explorer.py 源码修改（第十七轮）
+### 14.1 frontier_explorer.py 源码修改
 
 | 变更 | 旧值 | 新值 | 原因 |
 |------|------|------|------|
@@ -760,7 +497,7 @@ frontier_explorer:
 | `explore_step()` 添加位置级检查 | — | 达到阈值后清黑名单重试 | 给被误判的前沿一次重新评估机会 |
 | `result_callback()` SUCCEEDED 重置 | — | 清零 `stuck_position` 和计数 | 成功导航后重置位置级追踪 |
 
-### 17.2 config/frontier_explorer_params.yaml（第十七轮）
+### 14.2 config/frontier_explorer_params.yaml
 
 | 参数 | 旧值 | 新值 | 原因 |
 |------|------|------|------|
@@ -768,7 +505,7 @@ frontier_explorer:
 | `blacklist_radius` | (新增) | 5.0 | 黑名单匹配半径，覆盖同一不可达区域的不同前沿 |
 | `stuck_position_count` | (新增) | 3 | 连续失败触发阈值 |
 
-### 第十七轮 (2026-05-19)：修复位置级卡死
+### 第十七轮总结
 
 | 问题类别 | 日志表现 | 核心改动 |
 |----------|----------|----------|
@@ -778,7 +515,7 @@ frontier_explorer:
 
 ---
 
-## 十八、第十八轮 (2026-05-19)：让 Nav2 BT 恢复动作有机会执行——增大 stuck_timeout
+## 十五、frontier_explorer 参数优化（第十八轮 2026-05-19）：增大 stuck_timeout 让 Nav2 恢复生效
 
 ### 根因分析
 
@@ -792,24 +529,16 @@ frontier_explorer 的 `stuck_timeout=10s` 在 Nav2 完成恢复前就取消了�
 
 frontier_explorer 10 秒就取消 → Nav2 的 BackUp 恢复动作**从未执行** → 机器人永远无法通过后退脱困。
 
-**正确分工**：后退恢复是 Nav2 BT 的工作。frontier_explorer 的 stuck 检测只是最终安全网，应等 Nav2 完成全部恢复尝试后再介入。
-
-### 18.1 config/frontier_explorer_params.yaml（第十八轮）
+### 15.1 config/frontier_explorer_params.yaml
 
 | 参数 | 旧值 | 新值 | 原因 |
 |------|------|------|------|
 | `stuck_timeout` | 10.0 | 180.0 | 给 Nav2 足够时间完成完整恢复周期：progress_checker 60s + BT 6 轮恢复 × ~20s |
 | `stuck_distance` | 0.15 | 0.5 | 配合更长的超时，0.5m 表示机器人确实在移动（而非噪声） |
 
-### 第十八轮 (2026-05-19)：增大 stuck_timeout 让 Nav2 恢复生效
-
-| 问题类别 | 日志表现 | 核心改动 |
-|----------|----------|----------|
-| Nav2 BT 恢复被抢占 | stuck_timeout=10s 在 Nav2 BackUp 执行前取消目标 | stuck_timeout 增至 180s，让 Nav2 完成全部 6 轮恢复 |
-
 ---
 
-## 十九、第十九轮 (2026-05-19)：朝向过滤器导致角落处过早宣布完成
+## 十六、frontier_explorer 源码修改（第十九轮 2026-05-19）：朝向过滤器导致角落处过早宣布完成
 
 ### 根因分析
 
@@ -817,7 +546,7 @@ frontier_explorer 10 秒就取消 → Nav2 的 BackUp 恢复动作**从未执行
 
 实际上地图仍有一半区域未探索。
 
-### 19.1 frontier_explorer.py — 两轮过滤策略
+### 16.1 两轮过滤策略
 
 **代码改动**（`find_frontiers()` 方法）：
 
@@ -832,4 +561,142 @@ frontier_explorer 10 秒就取消 → Nav2 的 BackUp 恢复动作**从未执行
 **效果**：
 - 正常情况下（前方有前沿）→ 行为不变，优先选择前方目标
 - 在角落/死胡同（前方无前沿）→ 放宽朝向约束，接受身后目标，让 SmacPlannerHybrid REEDS_SHEPP 规划掉头路径
-- 朝向仍通过 `heading_weight` 作为**评分偏好**，不会倒退到原来 explore_lite 的无朝向感知状态
+- 朝向仍通过 `heading_weight` 作为**评分偏好**，不会退回到无朝向感知状态
+
+---
+
+## 十七、frontier_explorer 参数优化（第二十轮 2026-05-19）：修复探索在角落后过早宣布完成
+
+> 基于日志：`log/explore_2026-05-19_19-10-41.log`
+
+### 根因分析
+
+机器人到达 (-47.80, -28.12) 后连续 10 次检测不到前沿，宣布"EXPLORATION COMPLETE"。但地图有 **25.7% 未知区域**（53,955 个前沿格子），远未完成。
+
+用保存的地图模拟 `find_frontiers()` 过滤逻辑：
+- 15m 范围内有 50 个有效前沿集群，但全部在机器人身后（航向差 138°~180°）
+- 这些集群通过 `relaxed_goals` 桶时可能因 SLAM 实时更新差异被过滤
+- **根本问题**：机器人"一条路走到黑"到达角落，`max_goal_distance=15m` 对 ~60×70m 场景太小，无法导航回未探索区域
+
+### 17.1 frontier_explorer.py 源码修改
+
+| 变更 | 说明 |
+|------|------|
+| 新增 `_long_range_fallback()` 方法 | 当 `find_frontiers()` 第一阶段（距离+航向约束）返回空时，搜索全地图最大前沿集群，在 `max_goal_distance` 处生成中间航点 |
+| 新增 `_unknown_ratio()` 方法 | 计算当前地图未知区域比例 |
+| `explore_step()` 覆盖率检查 | 宣布完成前检查 `_unknown_ratio() > max_unknown_ratio`，若未达标则重置计数器并清空黑名单 |
+
+**远距离回退机制**：
+1. 正常搜索无结果 → 触发 `_long_range_fallback()`
+2. 搜索全地图，找最大前沿集群（size ≥ `long_range_min_cluster_size`）
+3. 计算集群质心方向，在 `max_goal_distance` 处生成中间航点
+4. 航点必须通过 snap_to_free + obstacle_clearance 检查
+5. 日志：`"Long-range fallback: cluster at (x, y) [size=N, dist=Dm], waypoint (wx, wy)"`
+
+**覆盖率保护**：
+- 即使连续 30 次无前沿，若未知区域 > 15% 仍不宣布完成
+- 重置计数器并清空黑名单，给前沿重新评估机会
+
+### 17.2 config/frontier_explorer_params.yaml
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `max_goal_distance` | 15.0 | 20.0 | 扩大搜索半径，仓库场景前沿间距通常 10-30m |
+| `completion_check_count` | 10 | 30 | 10 次=20 秒太短，SLAM 0.2Hz 更新频率下可能漏前沿。30 次=60 秒给 SLAM 足够时间稳定 |
+| `long_range_enabled` | (新增) | true | 启用远距离前沿回退机制 |
+| `long_range_min_cluster_size` | (新增) | 50 | 远距离搜索最小集群阈值，过滤零散前沿 |
+| `max_unknown_ratio` | (新增) | 0.15 | 地图未知区域超过 15% 时不允许宣布完成 |
+
+### 第二十轮总结
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 角落后无前沿可到达 | 25.7% 未知区域却宣布完成 | `_long_range_fallback()` 生成中间航点导航回未探索区域 |
+| 完成判定过快 | 连续 10 次（20 秒）即宣布完成 | `completion_check_count` 10→30, 新增覆盖率保护 `max_unknown_ratio=0.15` |
+| 搜索半径过小 | 15m 对 60×70m 场景不够 | `max_goal_distance` 15→20m |
+
+---
+
+## 十八、frontier_explorer 参数优化（第二十一轮 2026-05-19）：修复探索完成后仍遗留大片未知区域
+
+> 基于日志：`log/explore_2026-05-19_19-43-11.log`
+
+### 根因分析
+
+探索任务运行 ~53 分钟后宣布"EXPLORATION COMPLETE"，52/53 个目标成功到达。但最终地图仍有 351,943 个未知单元格（8.8%），更关键的是**地图中还有 366 个 ≥20 格的前沿簇、61,968 个前沿单元格**未被探测到。
+
+**根因链条**：
+
+1. **机器人停在角落 (-47.71, -45.02)**：距地图对侧前沿超过 20m
+2. **`max_goal_distance: 20.0` 过滤掉了所有远距离前沿**：前沿目标必须在 20m 以内
+3. **`_long_range_fallback` 只尝试 1 个簇**：选最大簇生成中间航点，失败即放弃
+4. **`_unknown_ratio()` 用整个 100m×100m 网格计算**：90.7% 都是空地（free），8.8% 未知低于 15% 阈值，误判为"覆盖完成"。实际上 289,975 个未知格子被墙壁包围（不可达），62,000 个是可达但被遗漏的
+5. **`long_range_min_cluster_size: 50` 过滤了中型簇**：366 个簇中很多是 20-50 格的中型簇
+
+### 18.1 参数调整 (`config/frontier_explorer_params.yaml`)
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `max_goal_distance` | 20.0 | 35.0 | 100m×100m 地图中 20m 搜索半径仅覆盖 12.5%，35m 覆盖 38% |
+| `long_range_min_cluster_size` | 50 | 20 | 与 `frontier_min_size` 对齐，不遗漏 20-50 格的中型前沿簇 |
+| `max_unknown_ratio` | 0.15 | 0.05 | 收紧覆盖门槛。旧值 0.15 在 4M 格地图中对应 60 万未知格子，过于宽松 |
+| `completion_check_count` | 30 | 20 | 配合 flood-fill 覆盖检查，减少无意义等待 |
+| `stuck_timeout` | 180.0 | 120.0 | 3 分钟过长，减少卡住等待时间 |
+
+### 18.2 `_unknown_ratio()` 改为 flood-fill 可达区域计算
+
+旧方法对整个地图网格（含大量外围空地）计算未知比例，导致 8.8% 看起来"足够好"。
+
+新方法：从机器人位置 BFS flood-fill，只统计可到达的自由空间和与之相邻的未知单元格。这样排除了被墙壁包围的不可达未知区域和远离仓库的开阔空间。
+
+### 18.3 `_long_range_fallback()` 尝试多个簇
+
+旧逻辑只选最大的 1 个簇，航点生成失败即放弃。新逻辑按簇大小降序排列，循环尝试前 3 个簇，任一成功即返回。同时修复了旧代码中 `return` 语句后的死代码。
+
+### 18.4 新增 `_reposition_to_frontiers()` 方法
+
+当覆盖不足且无前沿可用时，计算所有前沿簇的加权几何中心（权重 = 簇大小），导航到该位置重新扫描。这驱使机器人从角落移动到未探索区域的中心。
+
+在 `result_callback()` 中添加 `_repositioning` 标志处理，重新定位完成后打印日志重新搜索前沿。
+
+### 第二十一轮总结
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 未知区域比例误判 | 8.8% 未知（含大量外围空地）低于 15% 阈值 | `_unknown_ratio()` 改为 flood-fill 可达区域计算 |
+| 远距离前沿不可达 | 机器人在角落，前沿超过 20m | `max_goal_distance` 20→35m |
+| 长距离回退太弱 | 只试 1 个簇，失败即放弃 | `_long_range_fallback` 尝试前 3 个簇 |
+| 无法回溯未探索区域 | 无前沿时直接宣布完成 | 新增 `_reposition_to_frontiers()` 导航到前沿中心 |
+
+---
+
+## 十九、frontier_explorer 参数修复（2026-05-20）：修复位置卡死恢复无效
+
+> 基于日志：`log/explore_2026-05-19_22-16-06.log`
+
+### 根因分析
+
+机器人完成 29/35 个目标后在 (-21.45, 8.57) 永久卡死。位置级卡住检测触发后只做"清黑名单+重试"，但机器人**物理上无法移动**而非前沿被过滤。`_reposition_to_frontiers()` 仅在无前沿可发现时触发，位置卡死时仍有前沿存在所以不会触发。`max_global_retries=1` 只允许 1 次重试就放弃。
+
+### 19.1 frontier_explorer.py 源码修改
+
+| 变更 | 说明 |
+|------|------|
+| 位置级卡住检测移到 `find_frontiers()` 之前 | 卡住时跳过前沿搜索，直接尝试重新定位 |
+| 清黑名单后调用 `_reposition_to_frontiers()` | 导航到前沿簇加权中心，从新位置重新搜索 |
+| 重试耗尽时检查 `_unknown_ratio()` | 覆盖率不足则重置计数器并尝试重新定位，而非直接宣布完成 |
+
+### 19.2 config/frontier_explorer_params.yaml
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `stuck_timeout` | 120.0 | 180.0 | Nav2 完整恢复周期（progress_checker 60s + BT 6轮恢复 × ~20s）需要 >120s |
+| `max_global_retries` | 1 | 3 | 1 次重试太少，位置卡死需要多次尝试不同方向的重新定位 |
+
+### 第十九轮总结
+
+| 问题类别 | 日志表现 | 核心改动 |
+|----------|----------|----------|
+| 位置卡死恢复无效 | 4 次卡在 (-21.45, 8.57)，清黑名单后重试仍然卡住 | 位置卡死时触发 `_reposition_to_frontiers()` |
+| 重试耗尽过早放弃 | `max_global_retries=1` 仅 1 次重试就宣布完成 | 重试耗尽时检查覆盖率，不足则重置并重新定位 |
+| stuck_timeout 不足 | Nav2 恢复未完成就被取消 | `stuck_timeout` 120→180s |
