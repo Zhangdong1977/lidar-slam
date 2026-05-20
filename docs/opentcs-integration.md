@@ -24,6 +24,20 @@
 └─────────────────────────┘                              └──────────────────────────────┘
 ```
 
+### 机器人端节点链
+
+```
+Gazebo
+  → ros_gz_bridge (传感器 + /tf, /scan_raw→/scan)
+  → ackermann_control (底盘控制)
+  → static_tf (body_link → ackermann_robot/body_link/lidar)
+  → EKF (odom+imu → odom→body_link TF)
+  → AMCL + map_server (加载 auto_exploration_map, 提供 map→odom TF)
+  → Nav2 navigation (规划+控制)
+  → cmd_vel_bridge (Twist → Ackermann 转向)
+  → opentcs_nav2_bridge (/goal_pose → Nav2 action, TF → /amcl_pose)
+```
+
 ---
 
 ## 2. ROS2 通信接口
@@ -33,13 +47,13 @@
 | Topic | 消息类型 | 方向 | 说明 |
 |-------|---------|------|------|
 | `/goal_pose` | `geometry_msgs/PoseStamped` | openTCS → 机器人 | 导航目标点，frame_id 为 `map`，坐标单位为米 |
-| `/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` | openTCS → 机器人 | 设置机器人初始位姿，frame_id 为 `map`。**注意：本项目机器人始终从原点 (0,0) 启动，AMCL 已预配置初始位姿，此 topic 实际无需发送** |
+| `/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` | openTCS → 机器人 | 设置机器人初始位姿，frame_id 为 `map`。**注意：本项目机器人始终从原点 (0,0) 启动，AMCL 已预配置初始位姿 (`set_initial_pose: true`)，此 topic 实际无需发送** |
 
 ### 2.2 机器人 → openTCS（机器人发布）
 
 | Topic | 消息类型 | 方向 | 说明 |
 |-------|---------|------|------|
-| `/amcl_pose` | `geometry_msgs/PoseWithCovarianceStamped` | 机器人 → openTCS | 机器人实时位置，10Hz，frame_id 为 `map` |
+| `/amcl_pose` | `geometry_msgs/PoseWithCovarianceStamped` | 机器人 → openTCS | 机器人实时位置，10Hz（`pose_publish_rate: 10.0`），frame_id 为 `map` |
 | `/navigate_to_pose/_action/status` | `action_msgs/GoalStatusArray` | Nav2 → openTCS | 导航任务状态（STATUS_UNKNOWN=0, ACCEPTED=1, EXECUTING=2, SUCCEEDED=4, CANCELED=5, ABORTED=6） |
 
 ---
@@ -49,20 +63,32 @@
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
 | **ROS_DOMAIN_ID** | **42** | 当前机器人环境固定为 42，openTCS-NeNa 需在 Kernel Control Center 中将车辆 Domain ID 从默认 30 改为 42 |
-| DDS 中间件 | Fast-RTPS (`rmw_fastrtps_cpp`) | 机器人端使用 Fast-RTPS；openTCS-NeNa IHMC 库也基于 Fast-RTPS |
+| DDS 中间件 | Fast-RTPS (`rmw_fastrtps_cpp`) | 机器人端使用 Fast-RTPS（启动脚本中 `export RMW_IMPLEMENTATION=rmw_fastrtps_cpp`）；openTCS-NeNa IHMC 库也基于 Fast-RTPS |
 | Namespace | 空（单车）/ `robotN`（多车） | 单车时为空字符串；多车时每个机器人分配独立 namespace，topic 变为 `/robotN/goal_pose` 等 |
 
 ---
 
-## 4. 坐标系与单位
+## 4. 地图与坐标系
+
+### 4.1 地图参数
+
+| 项目 | 值 |
+|------|-----|
+| 地图文件 | `maps/auto_exploration_map.yaml` + `auto_exploration_map.pgm` |
+| 地图分辨率 | 0.05 m/像素 |
+| 地图原点 | (-50.200, -50.286) m |
+| 地图尺寸 | ~100m × 100m (2000×2000 像素) |
+| occupied_thresh | 0.65 |
+| free_thresh | 0.196 |
+| mode | trinary |
+
+### 4.2 坐标系
 
 | 项目 | 值 |
 |------|-----|
 | 坐标系 | `map` frame |
 | 坐标单位 | 米（ROS2 标准） |
 | 坐标范围 | X: -50 ~ +50 m, Y: -50 ~ +50 m |
-| 地图分辨率 | 0.05 m/像素 |
-| 地图原点 | (-4.958, -4.958) m |
 | 机器人初始位置 | (0, 0, 0) m, yaw=0 |
 | 航向约定 | 标准 ROS2：X 正方向 yaw=0，逆时针为正 |
 
@@ -84,13 +110,17 @@ ROS2坐标(m) = openTCS坐标(mm) / 1000 × plantModelScale
 |------|-----|------|
 | 车身尺寸 | 0.9m × 0.6m | 长 × 宽 |
 | Footprint | [[0.45,0.30], [0.45,-0.30], [-0.45,-0.30], [-0.45,0.30]] | 用于 Nav2 碰撞检测 |
-| 最大速度 | 1.4 m/s | 直线 |
+| 最大速度 | 0.5 m/s | 直线（`desired_linear_vel`） |
 | 最大倒车速度 | 0.5 m/s | |
 | 最大转向角 | ±30° (±0.5236 rad) | 阿克曼转向，不能原地旋转 |
 | 最小转弯半径 | ~0.35 m | |
 | 轴距 | 0.58 m | |
-| 导航目标容差 | ±0.35 m | 控制器判定到达的距离阈值 |
+| 导航目标容差 | ±0.25 m, yaw ±0.25 rad | `xy_goal_tolerance` + `yaw_goal_tolerance` |
 | 帧名称 | `body_link` | 机器人基座 frame |
+| Laser frame | `ackermann_robot/body_link/lidar` | 静态 TF，z=0.22m |
+| 控制器 | RegulatedPurePursuit | 阿克曼兼容，支持倒车 (`allow_reversing: true`) |
+| 控制器频率 | 20 Hz | |
+| Lookahead 距离 | 0.4 ~ 1.2 m | |
 
 ---
 
@@ -142,6 +172,17 @@ bash scripts/launch/sim_ackermann_opentcs.sh
 ```
 [opentcs_nav2_bridge] opentcs_nav2_bridge started: goal=/goal_pose, amcl=/amcl_pose, ...
 ```
+
+**节点启动时序：**
+
+| 延迟 | 节点 | 说明 |
+|------|------|------|
+| 0s | Gazebo, ros_gz_bridge（含 /tf 桥接 + /scan 重映射）, laser_tf, cmd_vel_bridge, RViz2 | 基础环境 |
+| 2s | ackermann_control | 底盘控制 |
+| 5s | EKF | 里程计融合 |
+| 15s | localization（map_server + AMCL） | 加载 `auto_exploration_map`，AMCL 定位 |
+| 25s | Nav2 navigation | 规划 + 控制 |
+| 30s | opentcs_nav2_bridge | openTCS 桥接 |
 
 ### 7.2 openTCS 端
 
@@ -214,7 +255,9 @@ ros2 topic echo /navigate_to_pose/_action/status --once
 ## 9. 注意事项
 
 1. **阿克曼转向约束**：机器人不能原地旋转，调头需要弧线空间。plant model 中相邻路径点之间需要留出足够的转弯半径（≥0.5m）
-2. **目标容差**：导航到达判定为 ±0.35m，plant model 中点位不需要精确到厘米级
-3. **目标点必须可到达**：目标位置必须在代价地图的自由空间内（距离障碍物 ≥0.6m）
+2. **目标容差**：导航到达判定为 ±0.25m + yaw ±0.25rad，plant model 中点位不需要精确到厘米级
+3. **目标点必须可到达**：目标位置必须在代价地图的自由空间内（距离障碍物 ≥0.6m，inflation_radius=1.0~1.2m）
 4. **新目标自动取消旧目标**：桥接节点收到新 `/goal_pose` 时会自动取消前一个未完成的导航目标
-5. **坐标系一致性**：所有坐标均在 `map` frame 下，使用预建地图 `ackermann_map.yaml`
+5. **坐标系一致性**：所有坐标均在 `map` frame 下，使用预建地图 `auto_exploration_map.yaml`
+6. **地图更新**：如工厂环境发生重大变化（货架移动、新增障碍物等），需重新建图并替换 `auto_exploration_map.yaml`
+7. **控制器使用 RegulatedPurePursuit**：已启用 `allow_reversing: true`，机器人可在必要时倒车；规划器使用 Navfn (Dijkstra)

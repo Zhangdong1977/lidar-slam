@@ -14,14 +14,18 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
     world_file = os.path.join(project_dir, 'worlds', 'factory.sdf')
-    nav2_params = os.path.join(project_dir, 'config', 'nav2_params_ackermann.yaml')
-    map_file = os.path.join(project_dir, 'maps', 'ackermann_map.yaml')
+    nav2_params = os.path.join(project_dir, 'config', 'nav2_params_opentcs.yaml')
+    map_file = os.path.join(project_dir, 'maps', 'auto_exploration_map.yaml')
     rviz_config = os.path.join(project_dir, 'config', 'nav.rviz')
     ekf_config = os.path.join(project_dir, 'config', 'ekf.yaml')
 
+    gz_model_paths = ':'.join([
+        os.path.join(project_dir, 'models'),
+        os.path.join(project_dir, 'third-party', 'aws-robomaker-small-warehouse-world', 'models'),
+    ])
     set_gz_resource_path = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH',
-        os.path.join(project_dir, 'models'),
+        gz_model_paths,
     )
 
     # 1. Gazebo Harmonic with world
@@ -40,7 +44,7 @@ def generate_launch_description():
         package='ros_gz_bridge',
         executable='parameter_bridge',
         arguments=[
-            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/scan_raw@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             '/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
@@ -49,6 +53,9 @@ def generate_launch_description():
         parameters=[{
             'qos_overrides./tf.publisher.durability': 'transient_local',
         }],
+        remappings=[
+            ('/scan_raw', '/scan'),
+        ],
         output='screen',
     )
 
@@ -67,7 +74,7 @@ def generate_launch_description():
             '--x', '0', '--y', '0', '--z', '0.22',
             '--roll', '0', '--pitch', '0', '--yaw', '0',
             '--frame-id', 'body_link',
-            '--child-frame-id', 'body_link/lidar',
+            '--child-frame-id', 'ackermann_robot/body_link/lidar',
         ],
         parameters=[{'use_sim_time': True}],
     )

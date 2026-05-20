@@ -22,7 +22,16 @@ unset ROS_DISCOVERY_SERVER
 LIDAR_SLAM_ROOT="${LIDAR_SLAM_ROOT:-/home/hello/lidar-slam}"
 source "${LIDAR_SLAM_ROOT}/install/setup.bash"
 
+# 日志输出到 log 目录
+LOG_DIR="${LIDAR_SLAM_ROOT}/log"
+mkdir -p "${LOG_DIR}"
+LOG_FILE="${LOG_DIR}/opentcs_$(date +%Y-%m-%d_%H-%M-%S).log"
+
+echo "日志文件: ${LOG_FILE}"
+
 # 清理残留进程，避免 Gazebo/ROS2 僵尸进程导致启动失败
 bash "${LIDAR_SLAM_ROOT}/scripts/tools/cleanup_ros2.sh"
 
-exec ros2 launch "${LIDAR_SLAM_ROOT}/launch/sim_ackermann_opentcs.launch.py"
+exec ros2 launch "${LIDAR_SLAM_ROOT}/launch/sim_ackermann_opentcs.launch.py" "$@" \
+    < /dev/null \
+    >> "${LOG_FILE}" 2>&1

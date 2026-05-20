@@ -700,3 +700,47 @@ frontier_explorer 10 秒就取消 → Nav2 的 BackUp 恢复动作**从未执行
 | 位置卡死恢复无效 | 4 次卡在 (-21.45, 8.57)，清黑名单后重试仍然卡住 | 位置卡死时触发 `_reposition_to_frontiers()` |
 | 重试耗尽过早放弃 | `max_global_retries=1` 仅 1 次重试就宣布完成 | 重试耗尽时检查覆盖率，不足则重置并重新定位 |
 | stuck_timeout 不足 | Nav2 恢复未完成就被取消 | `stuck_timeout` 120→180s |
+
+---
+
+## 二十、Gazebo 模型路径修复（2026-05-20）：factory.sdf 模型加载失败
+
+### 根因分析
+
+`sim_ackermann_opentcs.sh` 启动后 Gazebo 立即退出，日志显示所有 `aws_robomaker_warehouse_*` 模型无法找到（Error Code 14）。`GZ_SIM_RESOURCE_PATH` 仅指向 `/home/hello/lidar-slam/models`（仅含 `ackermann/`），但 factory.sdf 引用的仓库货架/桌子/杂物模型实际位于 `third-party/aws-robomaker-small-warehouse-world/models/`。Gazebo 作为 required 节点，退出后导致整个 launch 系统关闭。
+
+### 20.1 launch/sim_ackermann_opentcs.launch.py
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `GZ_SIM_RESOURCE_PATH` | `models/` | `models/:third-party/aws-robomaker-small-warehouse-world/models/` | 路径缺少 AWS 仓库模型目录，Gazebo 无法解析 `model://aws_robomaker_warehouse_*` URI |
+
+### 20.2 改为 SLAM 模式
+
+| 变更 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| 定位方式 | `localization_launch.py`（map_server + AMCL）+ 静态地图 `ackermann_map.yaml`（9.9m×9.9m） | `slam_toolbox online_async` | 静态地图仅 198×198 像素（~10m），远小于 factory.sdf 的 ~100m×100m 场景，需实时建图 |
+| bridge scan topic | `/scan` | `/scan_raw` + `scan_range_filter` | SLAM 模式需要过滤 inf/NaN 扫描数据 |
+| bridge /tf | 包含 `/tf@tf2_msgs/msg/TFMessage` | 移除 | slam_toolbox 负责发布 map→odom TF，不需要桥接 Gazebo 的 /tf |
+| slam_toolbox 启动延迟 | N/A | 5s（与 EKF 同步） | slam_toolbox 需要先收到 odom 和 scan 数据 |
+
+---
+
+## 十三、openTCS launch 桥接修复（2026-05-20）
+
+### 13.1 /scan 话题名称不匹配 + ROS2 侧重映射
+
+| 文件 | 变更 | 旧值 | 新值 | 原因 |
+|------|------|------|------|------|
+| `sim_ackermann_opentcs.launch.py` | bridge scan topic | `/scan` | `/scan_raw`（GZ 侧） | URDF gpu_lidar 发布到 `/scan_raw` |
+| `sim_ackermann_opentcs.launch.py` | bridge remappings | 无 | `('/scan_raw', '/scan')` | ROS2 侧重映射到 `/scan`，让 AMCL/costmap 能收到数据 |
+| `sim_ackermann_nav.launch.py` | 同上 | 同上 | 同上 | 同上 |
+
+### 13.2 TF frame_id 不匹配
+
+| 文件 | 变更 | 旧值 | 新值 | 原因 |
+|------|------|------|------|------|
+| `sim_ackermann_opentcs.launch.py` | static TF child frame | `body_link/lidar` | `ackermann_robot/body_link/lidar` | Gazebo 会给模型内的 frame 加上 `<model_name>/` 前缀，导致 scan 数据的 frame_id 与 TF 树不匹配 |
+| `sim_ackermann_nav.launch.py` | 同上 | 同上 | 同上 | 同上 |
+
+**故障链**：scan frame_id 为 `ackermann_robot/body_link/lidar` → TF 树只有 `body_link/lidar` → AMCL 无法将 scan 转换到 map frame → `map` frame 不存在 → Nav2 bringup 超时
