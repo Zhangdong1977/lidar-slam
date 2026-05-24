@@ -1,0 +1,16 @@
+rs485_chassis_bridge:
+  ros__parameters:
+    serial_port: "/tmp/chassis_cmd"
+    baudrate: 115200
+    refresh_interval_ms: 200
+    max_steering_angle: 0.5236
+    max_velocity: 1.4
+    timeout_ms: 500
+
+rs485_chassis_receiver:
+  ros__parameters:
+    serial_port: "/tmp/chassis_recv"
+    baudrate: 115200
+    max_steering_angle: 0.5236
+    max_velocity: 1.4
+    timeout_ms: 500

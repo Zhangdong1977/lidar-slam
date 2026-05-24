@@ -44,6 +44,10 @@ VehicleController::VehicleController(
   track_width_ = body_width_ + (2 * wheel_width_ / 2);
   wheel_base_ = body_length_ - (2 * wheel_radius_);
 
+  declare_parameter<double>("transition_duration", 0.5);
+  get_parameter("transition_duration", transition_duration_);
+  direction_change_time_ = get_clock()->now();
+
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
     "/steering_angle", 10,
     std::bind(&VehicleController::steering_angle_callback, this, std::placeholders::_1));
@@ -167,15 +171,42 @@ void VehicleController::velocity_callback(
 {
   last_velocity_time_ = get_clock()->now();
 
+  double new_velocity{0.0};
   if (msg->data > max_velocity_) {
-    velocity_ = max_velocity_;
+    new_velocity = max_velocity_;
   } else if (msg->data < -max_velocity_) {
-    velocity_ = -max_velocity_;
+    new_velocity = -max_velocity_;
   } else {
-    velocity_ = msg->data;
+    new_velocity = msg->data;
   }
 
-  const auto wheel_velocity{rear_differential_velocity()};
+  // Detect direction change (forward <-> reverse)
+  if (transition_duration_ > 0.0 &&
+    prev_velocity_ * new_velocity < 0.0 &&
+    std::abs(prev_velocity_) > 0.01 &&
+    std::abs(new_velocity) > 0.01)
+  {
+    direction_change_time_ = get_clock()->now();
+    is_transitioning_ = true;
+  }
+  prev_velocity_ = new_velocity;
+  velocity_ = new_velocity;
+
+  auto wheel_velocity{rear_differential_velocity()};
+
+  // Scale rear wheel speeds during direction-change transition
+  if (is_transitioning_) {
+    const double elapsed =
+      (get_clock()->now() - direction_change_time_).nanoseconds() / 1e9;
+    if (elapsed < transition_duration_) {
+      const double scale = elapsed / transition_duration_;
+      wheel_velocity.first *= scale;
+      wheel_velocity.second *= scale;
+    } else {
+      is_transitioning_ = false;
+    }
+  }
+
   wheel_angular_velocity_ = {
     wheel_velocity.first / wheel_radius_,
     wheel_velocity.second / wheel_radius_};

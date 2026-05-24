@@ -25,6 +25,19 @@ pkill -f "joint_state_publisher" 2>/dev/null || true
 pkill -f "controller_manager" 2>/dev/null || true
 pkill -f "rqt" 2>/dev/null || true
 
+# ROS2 CLI monitoring tools (tf2_echo, topic hz/echo, node list, service call, etc.)
+pkill -f "tf2_echo" 2>/dev/null || true
+pkill -f "tf2_ros" 2>/dev/null || true
+pkill -f "ros2 topic" 2>/dev/null || true
+pkill -f "ros2 node" 2>/dev/null || true
+pkill -f "ros2 service" 2>/dev/null || true
+pkill -f "ros2 action" 2>/dev/null || true
+pkill -f "ros2 run" 2>/dev/null || true
+pkill -f "ros2 launch" 2>/dev/null || true
+pkill -f "ros2 lifecycle" 2>/dev/null || true
+pkill -f "ros2 param" 2>/dev/null || true
+pkill -f "ros2 doctor" 2>/dev/null || true
+
 # Gazebo classic + modern (gz sim)
 pkill -f "gzserver" 2>/dev/null || true
 pkill -f "gzclient" 2>/dev/null || true
@@ -52,6 +65,17 @@ pkill -9 -f "robot_state_publisher" 2>/dev/null || true
 pkill -9 -f "joint_state_publisher" 2>/dev/null || true
 pkill -9 -f "controller_manager" 2>/dev/null || true
 pkill -9 -f "rqt" 2>/dev/null || true
+pkill -9 -f "tf2_echo" 2>/dev/null || true
+pkill -9 -f "tf2_ros" 2>/dev/null || true
+pkill -9 -f "ros2 topic" 2>/dev/null || true
+pkill -9 -f "ros2 node" 2>/dev/null || true
+pkill -9 -f "ros2 service" 2>/dev/null || true
+pkill -9 -f "ros2 action" 2>/dev/null || true
+pkill -9 -f "ros2 run" 2>/dev/null || true
+pkill -9 -f "ros2 launch" 2>/dev/null || true
+pkill -9 -f "ros2 lifecycle" 2>/dev/null || true
+pkill -9 -f "ros2 param" 2>/dev/null || true
+pkill -9 -f "ros2 doctor" 2>/dev/null || true
 pkill -9 -f "gzserver" 2>/dev/null || true
 pkill -9 -f "gzclient" 2>/dev/null || true
 pkill -9 -f "gazebo" 2>/dev/null || true

@@ -108,7 +108,7 @@ controller_server:
       use_cost_regulated_linear_velocity_scaling: false
       regulated_linear_scaling_min_radius: 0.5
       regulated_linear_scaling_min_speed: 0.15
-      allow_reversing: true
+      allow_reversing: false
       max_angular_accel: 1.0
       max_robot_pose_search_dist: 10.0
 
@@ -324,3 +324,15 @@ docking_server:
       external_detection_rotation_pitch: -1.57
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
+
+lifecycle_manager_localization:
+  ros__parameters:
+    autostart: true
+    node_names: ['map_server', 'amcl']
+    service_call_timeout: 30000.0
+
+lifecycle_manager_navigation:
+  ros__parameters:
+    autostart: true
+    node_names: ['controller_server', 'smoother_server', 'planner_server', 'behavior_server', 'bt_navigator', 'waypoint_follower', 'velocity_smoother']
+    service_call_timeout: 30000.0

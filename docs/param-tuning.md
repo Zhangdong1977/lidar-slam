@@ -744,3 +744,126 @@ frontier_explorer 10 秒就取消 → Nav2 的 BackUp 恢复动作**从未执行
 | `sim_ackermann_nav.launch.py` | 同上 | 同上 | 同上 | 同上 |
 
 **故障链**：scan frame_id 为 `ackermann_robot/body_link/lidar` → TF 树只有 `body_link/lidar` → AMCL 无法将 scan 转换到 map frame → `map` frame 不存在 → Nav2 bringup 超时
+
+---
+
+## 二一、VehicleController 方向切换协调逻辑（2026-05-22）：修复驱动轮与方向轮配合不良
+
+### 根因分析
+
+Ackermann 小车调头时驱动轮和方向轮配合不好。后轮速度由 `forward_velocity_controller` 控制，可以瞬间反转；但前轮转向从 +30° 转到 -30° 需要 `2 × 0.5236 / 1.5708 ≈ 0.67 秒`（受 `max_steering_angular_velocity` 限制）。在方向切换的过渡期，后轮已按新方向行驶但前轮还在转动中，导致轨迹偏差和侧滑。
+
+### 21.1 src/ackermann_control/include/ackermann_control/vehicle_controller.hpp
+
+| 变更 | 说明 |
+|------|------|
+| 新增 `prev_velocity_` 成员 | 记录上一次速度值，用于检测方向切换 |
+| 新增 `direction_change_time_` 成员 | 记录方向切换发生的时间戳 |
+| 新增 `is_transitioning_` 成员 | 标记当前是否处于过渡期 |
+| 新增 `transition_duration_` 成员 | 过渡持续时间（秒），从 ROS 参数读取 |
+
+### 21.2 src/ackermann_control/src/vehicle_controller.cpp
+
+| 变更 | 说明 |
+|------|------|
+| 构造函数声明 `transition_duration` 参数 | 默认 0.5 秒，可通过 YAML 配置 |
+| `velocity_callback` 添加方向切换检测 | 当 `prev_velocity_ * new_velocity < 0` 且两者绝对值 > 0.01 时触发过渡 |
+| `velocity_callback` 添加过渡期速度缩放 | 过渡期内后轮速度按 `elapsed / transition_duration_` 线性缩放（0→1） |
+
+### 21.3 src/ackermann_control/config/ackermann_params.yaml
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `transition_duration` | (新增) | 0.5 | 方向切换过渡时间（秒），0 表示禁用。0.5s 对应前轮约 75% 响应时间（满打满转需 0.67s） |
+
+---
+
+## 二二、杜绝驱动轮在前前进（2026-05-23）：禁止正常导航时倒车
+
+### 根因分析
+
+Ackermann 小车在自动导航时以倒车姿态（驱动轮/后轮在前）长距离驶向目标。根因：RPP 控制器 `allow_reversing: true` 使得当 carrot 点在正后方时，控制器选择倒车前往而非前进掉头。同时 SmacPlannerHybrid 使用 `REEDS_SHEPP` 运动模型允许规划倒车路径段。
+
+目标：**完全杜绝正常导航时的倒车姿态**，脱困恢复（BackUp）仍保留倒车能力。
+
+### 22.1 config/nav2_params_exploration.yaml
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `controller_server.FollowPath` | `allow_reversing` | `true` | `false` | **核心修复**：RPP 控制器不再选择倒车跟踪路径，当目标在后方时执行前进弧线掉头 |
+| `planner_server.GridBased` | `motion_model_for_search` | `"REEDS_SHEPP"` | `"DUBIN"` | DUBIN 曲线只包含前进弧线，从规划层杜绝倒车路径 |
+| `planner_server.GridBased` | `allow_reverse_expansion` | `true` | (删除) | DUBIN 模型不支持倒车扩展，移除该参数 |
+| `planner_server.GridBased` | `reverse_penalty` | `5.0` | (删除) | DUBIN 模型无此参数 |
+
+### 22.2 config/nav2_params_opentcs.yaml
+
+| 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
+|----------|----------|------|------|----------|
+| `controller_server.FollowPath` | `allow_reversing` | `true` | `false` | 与探索模式一致，禁止倒车跟踪 |
+
+### 工作机制
+
+```
+正常导航：规划器(DUBIN) → 只生成前进路径 → RPP(不倒车) → 前进掉头 → 永远正向行驶
+脱困恢复：BT BackUp → 直接发 cmd_vel(负速) → cmd_vel_bridge → vehicle_controller → 可倒车
+手动遥控：keyboard/joystick → 直接发 /velocity(负速) → vehicle_controller → 可倒车
+```
+
+### 不修改的文件
+
+- `behavior_trees/ackermann_nav.xml`：BackUp 脱困行为保留
+- `velocity_smoother` 的 `min_velocity: [-0.5,...]`：BackUp 负速度需要通过
+- `cmd_vel_bridge.py`：透传负速度支持脱困
+- `vehicle_controller.cpp`：底层保留倒车能力
+- 遥控节点：手动遥控倒车不受限
+
+---
+
+## 二三、RS-485 底盘通信协议仿真（2026-05-23）
+
+### 概述
+
+新增 RS-485 底盘通信协议仿真层，在 Gazebo 仿真中复现实物控制卡的 485 串口通信链路。通过 socat 虚拟串口对模拟物理 RS-485 总线，使上位机软件同时适用于仿真和实物。
+
+### 23.1 协议映射
+
+| 485 通道 | 值范围 | 物理含义 | 转换公式 |
+|----------|--------|----------|---------|
+| CH1 转向 | 1000=左满, 1500=中, 2000=右满 | 弧度 [-0.5236, +0.5236] | `ch = 1500 + 500 × (angle / 0.5236)` |
+| CH2 速度 | 1000=全后退, 1500=停, 2000=全前进 | m/s [-1.4, +1.4] | `ch = 1500 + 500 × (speed / 1.4)` |
+| CH3-6 继电器 | 1000=断, 2000=通 | 二值 | 直通 |
+| CH7-8 预留 | 1500 | - | 固定1500 |
+| CH9-10 模拟量 | 1000-2000 | 0-5V | 直通 |
+
+### 23.2 config/rs485_bridge.yaml
+
+| 节点 | 参数 | 值 | 说明 |
+|------|------|-----|------|
+| `rs485_chassis_bridge` | `serial_port` | `/tmp/chassis_cmd` | 仿真用虚拟串口；实物改为 `/dev/ttyUSB1` |
+| `rs485_chassis_bridge` | `baudrate` | 115200 | 与控制卡一致 |
+| `rs485_chassis_bridge` | `refresh_interval_ms` | 200 | 协议要求 50-300ms |
+| `rs485_chassis_bridge` | `timeout_ms` | 500 | 协议要求 500ms 超时 |
+| `rs485_chassis_bridge` | `max_steering_angle` | 0.5236 | 与 ackermann_params.yaml 一致 |
+| `rs485_chassis_bridge` | `max_velocity` | 1.4 | 与 ackermann_params.yaml 一致 |
+| `rs485_chassis_receiver` | `serial_port` | `/tmp/chassis_recv` | 仿真用虚拟串口 |
+| `rs485_chassis_receiver` | `baudrate` | 115200 | 与控制卡一致 |
+| `rs485_chassis_receiver` | `timeout_ms` | 500 | 500ms 无帧则发布零值 |
+
+### 23.3 数据流
+
+```
+Nav2 → cmd_vel_bridge → /steering_angle, /velocity → rs485_chassis_bridge
+  → 编码485帧 → /tmp/chassis_cmd → [socat] → /tmp/chassis_recv
+  → rs485_chassis_receiver → 解码485帧 → /rs485/steering_angle, /rs485/velocity
+  → vehicle_controller (remap) → ros2_control → Gazebo
+```
+
+### 23.4 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/rs485_protocol.py` | 纯协议库（帧编解码、通道-物理量映射） |
+| `src/lidar_slam_nodes/lidar_slam_nodes/rs485_chassis_bridge.py` | 发送端节点（Float64→485帧→串口） |
+| `src/lidar_slam_nodes/lidar_slam_nodes/rs485_chassis_receiver.py` | 接收端节点（串口→485帧→Float64） |
+| `config/rs485_bridge.yaml` | RS-485 桥接参数配置 |
+| `launch/sim_ackermann_rs485.launch.py` | 带 RS-485 协议仿真的导航 launch 文件 |

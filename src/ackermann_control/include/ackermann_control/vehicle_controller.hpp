@@ -44,6 +44,12 @@ private:
   double steering_angle_;
   double velocity_;
 
+  // Direction change transition state
+  double prev_velocity_{0.0};
+  rclcpp::Time direction_change_time_;
+  bool is_transitioning_{false};
+  double transition_duration_{0.5};
+
   std::vector<double> wheel_angular_velocity_;
   std::vector<double> wheel_steering_angle_;
 

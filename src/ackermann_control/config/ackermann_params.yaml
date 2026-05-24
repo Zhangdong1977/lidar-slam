@@ -6,3 +6,4 @@ vehicle_controller:
     wheel_width: 0.08
     max_steering_angle: 0.5236
     max_velocity: 1.4
+    transition_duration: 0.5
