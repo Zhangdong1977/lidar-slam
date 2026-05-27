@@ -50,6 +50,7 @@ amcl:
 
 bt_navigator:
   ros__parameters:
+    use_sim_time: True
     global_frame: map
     robot_base_frame: body_link
     odom_topic: /odom
@@ -69,6 +70,7 @@ bt_navigator:
 
 controller_server:
   ros__parameters:
+    use_sim_time: True
     controller_frequency: 20.0
     costmap_update_timeout: 0.30
     min_x_velocity_threshold: 0.001
@@ -115,6 +117,7 @@ controller_server:
 local_costmap:
   local_costmap:
     ros__parameters:
+      use_sim_time: True
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
@@ -148,6 +151,7 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
+      use_sim_time: True
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
@@ -196,6 +200,7 @@ map_saver:
 
 planner_server:
   ros__parameters:
+    use_sim_time: True
     expected_planner_frequency: 20.0
     planner_plugins: ["GridBased"]
     costmap_update_timeout: 1.0
@@ -207,6 +212,7 @@ planner_server:
 
 smoother_server:
   ros__parameters:
+    use_sim_time: True
     smoother_plugins: ["simple_smoother"]
     simple_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
@@ -216,6 +222,7 @@ smoother_server:
 
 behavior_server:
   ros__parameters:
+    use_sim_time: True
     local_costmap_topic: local_costmap/costmap_raw
     global_costmap_topic: global_costmap/costmap_raw
     local_footprint_topic: local_costmap/published_footprint
@@ -243,6 +250,7 @@ behavior_server:
 
 waypoint_follower:
   ros__parameters:
+    use_sim_time: True
     loop_rate: 20
     stop_on_failure: false
     action_server_result_timeout: 900.0
@@ -254,6 +262,7 @@ waypoint_follower:
 
 velocity_smoother:
   ros__parameters:
+    use_sim_time: True
     smoothing_frequency: 20.0
     stamp_smoothed_velocity_with_smoothing_time: False
     scale_velocities: False
@@ -269,6 +278,7 @@ velocity_smoother:
 
 collision_monitor:
   ros__parameters:
+    use_sim_time: True
     base_frame_id: "body_link"
     odom_frame_id: "odom"
     cmd_vel_in_topic: "cmd_vel_smoothed"
@@ -287,7 +297,7 @@ collision_monitor:
       simulation_time_step: 0.1
       min_points: 6
       visualize: False
-      enabled: False
+      enabled: True
     observation_sources: ["scan"]
     scan:
       type: "scan"
@@ -298,6 +308,7 @@ collision_monitor:
 
 docking_server:
   ros__parameters:
+    use_sim_time: True
     controller_frequency: 50.0
     initial_perception_timeout: 5.0
     wait_charge_timeout: 5.0
@@ -325,14 +336,44 @@ docking_server:
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
 
+route_server:
+  ros__parameters:
+    use_sim_time: True
+    base_frame: "body_link"
+    route_frame: "map"
+    path_density: 0.05
+    max_planning_time: 2.0
+    graph_file_loader: "GeoJsonGraphFileLoader"
+    graph_file_loader:
+      plugin: "nav2_route::GeoJsonGraphFileLoader"
+    graph_filepath: ""
+    edge_cost_functions: ["DistanceScorer", "DynamicEdgesScorer"]
+    DistanceScorer:
+      plugin: "nav2_route::DistanceScorer"
+    DynamicEdgesScorer:
+      plugin: "nav2_route::DynamicEdgesScorer"
+    operations: ["AdjustSpeedLimit", "ReroutingService"]
+    AdjustSpeedLimit:
+      plugin: "nav2_route::AdjustSpeedLimit"
+    ReroutingService:
+      plugin: "nav2_route::ReroutingService"
+    boundary_radius_to_achieve_node: 1.0
+    radius_to_achieve_node: 2.0
+
 lifecycle_manager_localization:
   ros__parameters:
     autostart: true
     node_names: ['map_server', 'amcl']
-    service_call_timeout: 30000.0
+    service_call_timeout: 60000.0
+    bond_timeout: 10.0
+    bond_heartbeat_period: 0.1
+    attempt_respawn_reconnection: true
 
 lifecycle_manager_navigation:
   ros__parameters:
     autostart: true
-    node_names: ['controller_server', 'smoother_server', 'planner_server', 'behavior_server', 'bt_navigator', 'waypoint_follower', 'velocity_smoother']
-    service_call_timeout: 30000.0
+    node_names: ['controller_server', 'smoother_server', 'planner_server', 'route_server', 'behavior_server', 'velocity_smoother', 'collision_monitor', 'bt_navigator', 'waypoint_follower', 'docking_server']
+    service_call_timeout: 60000.0
+    bond_timeout: 10.0
+    bond_heartbeat_period: 0.1
+    attempt_respawn_reconnection: true

@@ -1,0 +1,648 @@
+#!/usr/bin/env python3
+"""Vehicle state node for jvs-opentcs Sidecar integration.
+
+Publishes full vehicle runtime state for the jvs-opentcs-ros2-sidecar to consume.
+Sidecar subscribes to these ROS2 topics and exposes HTTP REST API to openTCS/JVS.
+
+Data flow:
+  Sidecar --/goal_pose--> this node --NavigateToPose--> Nav2
+  Nav2 TF ----> this node --/amcl_pose----> Sidecar (10Hz)
+                        \\--/robot_state--> Sidecar (1Hz, JSON with 29+ fields)
+                        \\--/battery_state-> Sidecar (1Hz, simulated)
+"""
+
+import json
+import hashlib
+import math
+import os
+import time
+import uuid
+
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from nav_msgs.msg import Odometry
+from nav2_msgs.action import NavigateToPose
+from sensor_msgs.msg import BatteryState, LaserScan
+from std_msgs.msg import Bool, String
+import tf2_ros
+
+try:
+    from nav2_collision_monitor.msg import CollisionMonitorState as CollisionMonitorStateMsg
+    _HAS_CM_MSG = True
+except ImportError:
+    _HAS_CM_MSG = False
+
+
+class VehicleState:
+    IDLE = 'IDLE'
+    WORKING = 'WORKING'
+    CHARGING = 'CHARGING'
+    PAUSED = 'PAUSED'
+    ERROR = 'ERROR'
+    OFFLINE = 'OFFLINE'
+    MANUAL = 'MANUAL'
+
+
+class DispatchStatus:
+    UNKNOWN = 'UNKNOWN'
+    ACCEPTED = 'ACCEPTED'
+    EXECUTING = 'EXECUTING'
+    SUCCEEDED = 'SUCCEEDED'
+    CANCELING = 'CANCELING'
+    CANCELED = 'CANCELED'
+    ABORTED = 'ABORTED'
+    BLOCKED = 'BLOCKED'
+    REJECTED = 'REJECTED'
+
+
+class LocalizationStatus:
+    OK = 'OK'
+    DEGRADED = 'DEGRADED'
+    LOST = 'LOST'
+    INITIALIZING = 'INITIALIZING'
+
+
+# Nav2 action_msgs GoalStatus codes
+GOAL_STATUS_UNKNOWN = 0
+GOAL_STATUS_ACCEPTED = 1
+GOAL_STATUS_EXECUTING = 2
+GOAL_STATUS_CANCELING = 3
+GOAL_STATUS_SUCCEEDED = 4
+GOAL_STATUS_CANCELED = 5
+GOAL_STATUS_ABORTED = 6
+
+
+class OpentcsVehicleNode(Node):
+    def __init__(self):
+        super().__init__('opentcs_vehicle_node')
+
+        # --- Declare parameters ---
+        self.declare_parameter('vehicle_name', 'ackermann_robot')
+        vehicle_name = self.get_parameter('vehicle_name').value
+
+        self.declare_parameter('access_identity', 'ackermann_robot')
+        self.declare_parameter('namespace', '')
+        self.declare_parameter('domain_id', 42)
+        self.declare_parameter('base_frame', 'body_link')
+        self.declare_parameter('map_frame', 'map')
+        # Sidecar-facing topics: dynamically prefixed with vehicle_name
+        self.declare_parameter('amcl_pose_topic', f'/{vehicle_name}/amcl_pose')
+        self.declare_parameter('goal_pose_topic', f'/{vehicle_name}/goal_pose')
+        self.declare_parameter('robot_state_topic', f'/{vehicle_name}/robot_state')
+        self.declare_parameter('battery_state_topic', f'/{vehicle_name}/battery_state')
+        # Nav2/internal topics: no vehicle name prefix
+        self.declare_parameter('nav_action_name', '/navigate_to_pose')
+        self.declare_parameter('pose_publish_rate', 10.0)
+        self.declare_parameter('status_sample_ms', 1000)
+        self.declare_parameter('heartbeat_timeout_ms', 30000)
+        self.declare_parameter('cancel_timeout_ms', 5000)
+        self.declare_parameter('max_speed', 1.4)
+        self.declare_parameter('battery_sim_enabled', True)
+        self.declare_parameter('battery_sim_start_percent', 95.0)
+        self.declare_parameter('battery_sim_drain_rate', 5.0)
+        self.declare_parameter('goal_order_id_parse', True)
+        self.declare_parameter('emergency_stop_topic', '')
+        self.declare_parameter('safety_stop_topic', '')
+        self.declare_parameter('obstacle_detection_mode', 'collision_monitor')
+        self.declare_parameter('obstacle_scan_threshold', 0.5)
+        self.declare_parameter('obstacle_scan_angle_window', 1.047)
+        self.declare_parameter('battery_real_topic', '/battery_state_real')
+        self.declare_parameter('odom_topic', '/odom')
+        self.declare_parameter('amcl_subscribe_topic', '/amcl_pose')
+        self.declare_parameter('position_report_topic', '')
+        self.declare_parameter('map_yaml_file', '')
+        self.declare_parameter('error_auto_recover_ms', 10000)
+
+        # Load parameters
+        self._vehicle_name = self.get_parameter('vehicle_name').value
+        self._access_identity = self.get_parameter('access_identity').value
+        self._base_frame = self.get_parameter('base_frame').value
+        self._map_frame = self.get_parameter('map_frame').value
+        pose_rate = self.get_parameter('pose_publish_rate').value
+        status_ms = self.get_parameter('status_sample_ms').value
+        battery_sim = self.get_parameter('battery_sim_enabled').value
+        battery_start = self.get_parameter('battery_sim_start_percent').value
+        battery_drain = self.get_parameter('battery_sim_drain_rate').value
+        cancel_timeout_s = self.get_parameter('cancel_timeout_ms').value / 1000.0
+        self._order_id_parse = self.get_parameter('goal_order_id_parse').value
+
+        # --- Internal state ---
+        self._state = VehicleState.IDLE
+        self._dispatch_status = DispatchStatus.UNKNOWN
+        self._localization_status = LocalizationStatus.INITIALIZING
+        self._localization_score = 0.0
+        self._fault_code = ''
+        self._fault_message = ''
+
+        # Goal tracking
+        self._goal_handle = None
+        self._send_goal_future = None
+        self._current_goal_id = ''
+        self._current_order_id = ''
+        self._distance_remaining = 0.0
+        self._estimated_time_remaining = 0.0
+        self._cancel_timeout_s = cancel_timeout_s
+
+        # Pose from TF
+        self._pose_x = 0.0
+        self._pose_y = 0.0
+        self._pose_yaw = 0.0
+        self._pose_quat_z = 0.0
+        self._pose_quat_w = 1.0
+        self._last_tf_time = 0.0
+
+        # Velocity from /odom
+        self._linear_velocity = 0.0
+        self._angular_velocity = 0.0
+
+        # AMCL covariance for localization quality
+        self._amcl_cov_x = 1.0
+        self._amcl_cov_y = 1.0
+        self._amcl_cov_yaw = 1.0
+
+        # Battery simulation
+        self._battery_sim = battery_sim
+        self._battery_start = battery_start
+        self._battery_drain = battery_drain
+        self._battery_percent = battery_start
+        self._battery_charging = False
+        self._start_time = time.monotonic()
+
+        # Safety state
+        self._emergency_stop = False
+        self._safety_stop = False
+        self._obstacle_detected = False
+
+        # Position reporting
+        self._current_position = ''
+        self._last_node_id = ''
+        self._next_position = ''
+
+        # Heartbeat tracking
+        self._last_goal_time = 0.0
+
+        # ERROR auto-recovery
+        self._error_auto_recover_s = self.get_parameter('error_auto_recover_ms').value / 1000.0
+        self._error_enter_time = 0.0
+
+        # Map checksum
+        self._map_checksum = self._compute_map_checksum(
+            self.get_parameter('map_yaml_file').value)
+
+        # TF
+        self._tf_buffer = tf2_ros.Buffer()
+        self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
+
+        # --- Publishers ---
+        amcl_topic = self.get_parameter('amcl_pose_topic').value
+        state_topic = self.get_parameter('robot_state_topic').value
+        battery_topic = self.get_parameter('battery_state_topic').value
+
+        self._amcl_pub = self.create_publisher(
+            PoseWithCovarianceStamped, amcl_topic, 10)
+        self._state_pub = self.create_publisher(String, state_topic, 10)
+        self._battery_pub = self.create_publisher(
+            BatteryState, battery_topic, 10)
+
+        # --- Subscribers ---
+        goal_topic = self.get_parameter('goal_pose_topic').value
+        self.create_subscription(PoseStamped, goal_topic, self._goal_cb, 10)
+        odom_topic = self.get_parameter('odom_topic').value
+        self.create_subscription(Odometry, odom_topic, self._odom_cb, 10)
+        amcl_sub_topic = self.get_parameter('amcl_subscribe_topic').value
+        self.create_subscription(
+            PoseWithCovarianceStamped, amcl_sub_topic,
+            self._amcl_covariance_cb, 10)
+
+        # Safety subscriptions (conditional)
+        estop_topic = self.get_parameter('emergency_stop_topic').value
+        if estop_topic:
+            self.create_subscription(Bool, estop_topic, self._estop_cb, 10)
+        sstop_topic = self.get_parameter('safety_stop_topic').value
+        if sstop_topic:
+            self.create_subscription(Bool, sstop_topic, self._safety_stop_cb, 10)
+
+        # Obstacle detection subscription (conditional)
+        obs_mode = self.get_parameter('obstacle_detection_mode').value
+        if obs_mode == 'collision_monitor':
+            if _HAS_CM_MSG:
+                self.create_subscription(CollisionMonitorStateMsg,
+                                         '/collision_monitor_state',
+                                         self._collision_monitor_cb, 10)
+            else:
+                self.get_logger().warn(
+                    'nav2_collision_monitor.msg unavailable, falling back to scan mode')
+                self.create_subscription(LaserScan, '/scan',
+                                         self._scan_obstacle_cb, 10)
+        elif obs_mode == 'scan':
+            self.create_subscription(LaserScan, '/scan', self._scan_obstacle_cb, 10)
+
+        # Real battery subscription (when sim disabled)
+        if not self._battery_sim:
+            battery_real_topic = self.get_parameter('battery_real_topic').value
+            self._battery_real_msg = None
+            self.create_subscription(BatteryState, battery_real_topic,
+                                     self._battery_real_cb, 10)
+
+        # Position report subscription (optional, from sidecar)
+        pos_report_topic = self.get_parameter('position_report_topic').value
+        if pos_report_topic:
+            self.create_subscription(String, pos_report_topic,
+                                     self._position_report_cb, 10)
+
+        # --- Action client ---
+        action_name = self.get_parameter('nav_action_name').value
+        self._action_client = ActionClient(self, NavigateToPose, action_name)
+
+        # --- Timers ---
+        self.create_timer(1.0 / pose_rate, self._publish_pose)
+        self.create_timer(status_ms / 1000.0, self._publish_robot_state)
+        self.create_timer(1.0, self._publish_battery)
+        self.create_timer(0.5, self._check_localization)
+
+        self.get_logger().info(
+            f'opentcs_vehicle_node started: vehicle={self._vehicle_name}, '
+            f'base_frame={self._base_frame}, map_frame={self._map_frame}, '
+            f'pose_rate={pose_rate}Hz, state_rate={1000/status_ms:.1f}Hz, '
+            f'battery_sim={battery_sim}'
+        )
+
+    # =========================================================================
+    # Subscriptions
+    # =========================================================================
+
+    def _odom_cb(self, msg: Odometry):
+        self._linear_velocity = msg.twist.twist.linear.x
+        self._angular_velocity = msg.twist.twist.angular.z
+
+    def _amcl_covariance_cb(self, msg: PoseWithCovarianceStamped):
+        # Extract covariance diagonal for localization quality
+        c = msg.pose.covariance
+        self._amcl_cov_x = c[0]    # x variance
+        self._amcl_cov_y = c[7]    # y variance
+        self._amcl_cov_yaw = c[35] # yaw variance
+
+    def _estop_cb(self, msg: Bool):
+        self._emergency_stop = msg.data
+
+    def _safety_stop_cb(self, msg: Bool):
+        self._safety_stop = msg.data
+
+    def _collision_monitor_cb(self, msg):
+        # CollisionMonitorState.msg: state field is "CLEAR"/"APPROACH"/"STOP"
+        self._obstacle_detected = (msg.state not in ('CLEAR', ''))
+
+    def _scan_obstacle_cb(self, msg: LaserScan):
+        threshold = self.get_parameter('obstacle_scan_threshold').value
+        half_window = self.get_parameter('obstacle_scan_angle_window').value / 2.0
+        self._obstacle_detected = any(
+            msg.range_min < r < threshold
+            for i, r in enumerate(msg.ranges)
+            if abs(msg.angle_min + i * msg.angle_increment) <= half_window
+        )
+
+    def _position_report_cb(self, msg: String):
+        try:
+            data = json.loads(msg.data)
+            if 'nodeId' in data:
+                self._last_node_id = data['nodeId']
+            if 'currentPosition' in data:
+                self._current_position = data['currentPosition']
+            if 'nextPosition' in data:
+                self._next_position = data['nextPosition']
+        except (json.JSONDecodeError, TypeError):
+            self.get_logger().warn(f'Invalid position report: {msg.data}')
+
+    @staticmethod
+    def _compute_map_checksum(map_yaml_path: str) -> str:
+        if not map_yaml_path or not os.path.exists(map_yaml_path):
+            return ''
+        pgm_file = None
+        try:
+            with open(map_yaml_path, 'r') as f:
+                for line in f:
+                    if line.startswith('image:'):
+                        pgm_file = line.split(':', 1)[1].strip().strip('"').strip("'")
+                        break
+        except OSError:
+            return ''
+        if not pgm_file:
+            return ''
+        pgm_path = os.path.join(os.path.dirname(map_yaml_path), pgm_file)
+        if not os.path.exists(pgm_path):
+            return ''
+        sha = hashlib.sha256()
+        with open(pgm_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(8192), b''):
+                sha.update(chunk)
+        return sha.hexdigest()[:16]
+
+    # =========================================================================
+    # Goal management (Nav2 action)
+    # =========================================================================
+
+    def _goal_cb(self, msg: PoseStamped):
+        if not self._action_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().warn('NavigateToPose action server not available')
+            self._set_dispatch(DispatchStatus.REJECTED)
+            self._set_fault('NAV2_UNAVAILABLE', 'NavigateToPose action server not available')
+            return
+
+        # Parse orderId from frame_id (format: "map/orderId=TO-xxx")
+        if self._order_id_parse:
+            raw_frame = msg.header.frame_id or 'map'
+            if '/orderId=' in raw_frame:
+                self._current_order_id = raw_frame.split('/orderId=')[1].split('/')[0]
+                msg.header.frame_id = raw_frame.split('/orderId=')[0]
+            else:
+                self._current_order_id = ''
+        else:
+            self._current_order_id = ''
+
+        self._last_goal_time = time.monotonic()
+
+        # Cancel previous goal if active
+        if self._goal_handle is not None:
+            self.get_logger().info('Canceling previous goal before accepting new one')
+            self._cancel_goal_internal()
+
+        # Generate goal ID
+        self._current_goal_id = msg.header.stamp.sec * 1000 + msg.header.stamp.nanosec // 1000000
+        if self._current_goal_id == 0:
+            self._current_goal_id = int(time.time() * 1000)
+
+        # State transitions
+        self._set_state(VehicleState.WORKING)
+        self._set_dispatch(DispatchStatus.ACCEPTED)
+        self._clear_fault()
+
+        goal = NavigateToPose.Goal()
+        goal.pose = msg
+
+        self.get_logger().info(
+            f'Sending goal {self._current_goal_id}: '
+            f'({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f})'
+        )
+        self._send_goal_future = self._action_client.send_goal_async(
+            goal, feedback_callback=self._feedback_cb
+        )
+        self._send_goal_future.add_done_callback(self._goal_response_cb)
+
+    def _goal_response_cb(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().warn(f'Goal {self._current_goal_id} rejected by Nav2')
+            self._set_dispatch(DispatchStatus.REJECTED)
+            self._set_fault('GOAL_REJECTED', 'Nav2 rejected the navigation goal')
+            self._set_state(VehicleState.IDLE)
+            self._goal_handle = None
+            return
+
+        self._goal_handle = goal_handle
+        self._set_dispatch(DispatchStatus.EXECUTING)
+        self.get_logger().info(f'Goal {self._current_goal_id} accepted, EXECUTING')
+        goal_handle.get_result_async().add_done_callback(self._result_cb)
+
+    def _feedback_cb(self, feedback_msg):
+        feedback = feedback_msg.feedback
+        self._distance_remaining = feedback.distance_remaining
+        etr = feedback.estimated_time_remaining
+        self._estimated_time_remaining = etr.sec + etr.nanosec * 1e-9
+
+    def _result_cb(self, future):
+        result = future.result()
+        status = result.status
+        self.get_logger().info(f'Goal {self._current_goal_id} finished with status: {status}')
+
+        if status == GOAL_STATUS_SUCCEEDED:
+            self._set_dispatch(DispatchStatus.SUCCEEDED)
+            self._set_state(VehicleState.IDLE)
+        elif status == GOAL_STATUS_CANCELED:
+            self._set_dispatch(DispatchStatus.CANCELED)
+            self._set_state(VehicleState.IDLE)
+        elif status == GOAL_STATUS_ABORTED:
+            self._set_dispatch(DispatchStatus.ABORTED)
+            self._set_fault('NAV2_ABORTED', f'Nav2 aborted goal with status {status}')
+            self._set_state(VehicleState.ERROR)
+        else:
+            self._set_dispatch(DispatchStatus.ABORTED)
+            self._set_fault('NAV2_UNKNOWN', f'Nav2 finished with unknown status {status}')
+            self._set_state(VehicleState.ERROR)
+
+        self._goal_handle = None
+        self._distance_remaining = 0.0
+        self._estimated_time_remaining = 0.0
+        self._current_order_id = ''
+        self._current_goal_id = ''
+
+    def _cancel_goal_internal(self):
+        if self._goal_handle is not None:
+            self._set_dispatch(DispatchStatus.CANCELING)
+            self._goal_handle.cancel_goal_async()
+            self._goal_handle = None
+
+    def cancel_current_goal(self):
+        self._cancel_goal_internal()
+
+    # =========================================================================
+    # State management
+    # =========================================================================
+
+    def _set_state(self, new_state):
+        if self._state != new_state:
+            self.get_logger().info(f'State: {self._state} -> {new_state}')
+            self._state = new_state
+            if new_state == VehicleState.ERROR:
+                self._error_enter_time = time.monotonic()
+
+    def _set_dispatch(self, new_status):
+        if self._dispatch_status != new_status:
+            self.get_logger().info(f'Dispatch: {self._dispatch_status} -> {new_status}')
+            self._dispatch_status = new_status
+
+    def _set_fault(self, code, message):
+        self._fault_code = code
+        self._fault_message = message
+
+    def _clear_fault(self):
+        if self._fault_code:
+            self._fault_code = ''
+            self._fault_message = ''
+
+    # =========================================================================
+    # Localization quality
+    # =========================================================================
+
+    def _check_localization(self):
+        now = time.monotonic()
+
+        # ERROR auto-recovery: return to IDLE after timeout
+        if (self._state == VehicleState.ERROR
+                and self._error_auto_recover_s > 0
+                and self._error_enter_time > 0
+                and now - self._error_enter_time > self._error_auto_recover_s):
+            self.get_logger().info(
+                f'Auto-recovering from ERROR after {self._error_auto_recover_s:.0f}s '
+                f'(fault was: {self._fault_code}: {self._fault_message})')
+            self._set_state(VehicleState.IDLE)
+            self._set_dispatch(DispatchStatus.UNKNOWN)
+            self._clear_fault()
+
+        tf_age = now - self._last_tf_time
+
+        if self._last_tf_time == 0.0 or tf_age > 2.0:
+            self._localization_status = LocalizationStatus.INITIALIZING
+            self._localization_score = 0.0
+            return
+
+        cov_x = self._amcl_cov_x
+        cov_y = self._amcl_cov_y
+        cov_yaw = self._amcl_cov_yaw
+
+        if cov_x > 1.0 or cov_y > 1.0 or cov_yaw > 0.5:
+            self._localization_status = LocalizationStatus.LOST
+            self._localization_score = 0.1
+        elif cov_x > 0.25 or cov_y > 0.25 or cov_yaw > 0.15:
+            self._localization_status = LocalizationStatus.DEGRADED
+            self._localization_score = 0.5
+        else:
+            self._localization_status = LocalizationStatus.OK
+            self._localization_score = max(0.8, 1.0 - (cov_x + cov_y + cov_yaw) * 2)
+
+        # Heartbeat check
+        if self._last_goal_time > 0:
+            heartbeat_s = self.get_parameter('heartbeat_timeout_ms').value / 1000.0
+            elapsed = time.monotonic() - self._last_goal_time
+            if elapsed > heartbeat_s:
+                self.get_logger().warn(
+                    f'Sidecar heartbeat timeout: no goal received in {elapsed:.0f}s',
+                    throttle_duration_sec=60.0)
+
+    # =========================================================================
+    # Publishers
+    # =========================================================================
+
+    def _publish_pose(self):
+        try:
+            t = self._tf_buffer.lookup_transform(
+                self._map_frame, self._base_frame, rclpy.time.Time()
+            )
+        except tf2_ros.TransformException:
+            return
+
+        self._last_tf_time = time.monotonic()
+
+        self._pose_x = t.transform.translation.x
+        self._pose_y = t.transform.translation.y
+        q = t.transform.rotation
+        self._pose_quat_z = q.z
+        self._pose_quat_w = q.w
+        # Extract yaw from quaternion
+        self._pose_yaw = math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        )
+
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._map_frame
+        msg.pose.pose.position.x = self._pose_x
+        msg.pose.pose.position.y = self._pose_y
+        msg.pose.pose.position.z = t.transform.translation.z
+        msg.pose.pose.orientation = q
+        msg.pose.covariance = [0.0] * 36
+        msg.pose.covariance[0] = self._amcl_cov_x
+        msg.pose.covariance[7] = self._amcl_cov_y
+        msg.pose.covariance[35] = self._amcl_cov_yaw
+
+        self._amcl_pub.publish(msg)
+
+    def _publish_robot_state(self):
+        now = self.get_clock().now()
+        sec, nsec = now.seconds_nanoseconds()
+        timestamp = sec + nsec * 1e-9
+
+        state_dict = {
+            'vehicleName': self._vehicle_name,
+            'vehicleId': self._vehicle_name,
+            'accessIdentity': self._access_identity,
+            'timestamp': timestamp,
+            'frameId': self._map_frame,
+            'x': round(self._pose_x, 4),
+            'y': round(self._pose_y, 4),
+            'yaw': round(self._pose_yaw, 6),
+            'quaternionZ': round(self._pose_quat_z, 6),
+            'quaternionW': round(self._pose_quat_w, 6),
+            'linearVelocity': round(self._linear_velocity, 4),
+            'angularVelocity': round(self._angular_velocity, 4),
+            'battery': round(self._battery_percent, 1),
+            'charging': self._battery_charging,
+            'state': self._state,
+            'dispatchStatus': self._dispatch_status,
+            'localizationStatus': self._localization_status,
+            'localizationScore': round(self._localization_score, 2),
+            'emergencyStop': self._emergency_stop,
+            'safetyStop': self._safety_stop,
+            'obstacleDetected': self._obstacle_detected,
+            'faultCode': self._fault_code,
+            'faultMessage': self._fault_message,
+            'currentTransportOrder': self._current_order_id,
+            'goalId': str(self._current_goal_id),
+            'distanceRemaining': round(self._distance_remaining, 2),
+            'estimatedTimeRemaining': round(self._estimated_time_remaining, 1),
+            'currentPosition': self._current_position,
+            'lastNodeId': self._last_node_id,
+            'nextPosition': self._next_position,
+            'mapChecksum': self._map_checksum,
+            'maxSpeed': self.get_parameter('max_speed').value,
+        }
+
+        msg = String()
+        msg.data = json.dumps(state_dict, ensure_ascii=False)
+        self._state_pub.publish(msg)
+
+    def _battery_real_cb(self, msg: BatteryState):
+        self._battery_real_msg = msg
+        self._battery_percent = msg.percentage
+        self._battery_charging = (
+            msg.power_supply_status == BatteryState.POWER_SUPPLY_STATUS_CHARGING
+        )
+
+    def _publish_battery(self):
+        if not self._battery_sim:
+            if self._battery_real_msg is not None:
+                self._battery_pub.publish(self._battery_real_msg)
+            else:
+                self.get_logger().warn(
+                    'Battery sim disabled but no real battery data received',
+                    throttle_duration_sec=30.0)
+            return
+
+        elapsed_hours = (time.monotonic() - self._start_time) / 3600.0
+        self._battery_percent = max(
+            0.0,
+            self._battery_start - self._battery_drain * elapsed_hours
+        )
+
+        msg = BatteryState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.voltage = 48.0 * (self._battery_percent / 100.0)
+        msg.percentage = self._battery_percent
+        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
+        msg.present = True
+
+        self._battery_pub.publish(msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = OpentcsVehicleNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

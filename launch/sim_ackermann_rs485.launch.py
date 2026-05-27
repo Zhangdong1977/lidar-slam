@@ -12,6 +12,7 @@ import os
 
 from launch import LaunchDescription
 from launch.actions import (
+    DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
@@ -20,7 +21,7 @@ from launch.actions import (
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import Command, FindExecutable, PathJoinSubstitution
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 
 
 def generate_launch_description():
@@ -31,6 +32,7 @@ def generate_launch_description():
     rviz_config = os.path.join(project_dir, 'config', 'nav.rviz')
     ekf_config = os.path.join(project_dir, 'config', 'ekf.yaml')
     rs485_config = os.path.join(project_dir, 'config', 'rs485_bridge.yaml')
+    opentcs_vehicle_config = os.path.join(project_dir, 'config', 'opentcs_vehicle.yaml')
 
     xacro_file = os.path.join(project_dir, 'models', 'ackermann', 'ackermann.xacro')
 
@@ -175,10 +177,10 @@ def generate_launch_description():
         parameters=[ekf_config, {'use_sim_time': True}],
     )
 
-    # 11. Nav2 localization
+    # 11. Nav2 localization (custom: passes configured_params to lifecycle_manager)
     localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            FindPackageShare('nav2_bringup'), '/launch/localization_launch.py'
+            os.path.join(project_dir, 'launch', 'localization_custom.launch.py')
         ]),
         launch_arguments={
             'map': map_file,
@@ -187,13 +189,14 @@ def generate_launch_description():
             'params_file': nav2_params,
             'use_composition': 'False',
             'use_respawn': 'False',
+            'vehicle_name': LaunchConfiguration('vehicle_name'),
         }.items(),
     )
 
-    # 12. Nav2 navigation
+    # 12. Nav2 navigation (custom launch: lifecycle_manager gets service_call_timeout)
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            FindPackageShare('nav2_bringup'), '/launch/navigation_launch.py'
+            os.path.join(project_dir, 'launch', 'navigation_custom.launch.py')
         ]),
         launch_arguments={
             'use_sim_time': 'True',
@@ -212,18 +215,39 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
-    # 14. openTCS-Nav2 bridge
-    opentcs_bridge = Node(
+    # 14. Route graph loader (receives GeoJSON from Sidecar, loads into route_server)
+    route_graph_loader = Node(
         package='lidar_slam_nodes',
-        executable='opentcs_nav2_bridge',
+        executable='route_graph_loader',
         output='screen',
         parameters=[{
             'use_sim_time': True,
-            'pose_publish_rate': 10.0,
+            'graph_save_path': '/tmp/route_graph.geojson',
         }],
     )
 
-    # 15. RViz2
+    # 15. openTCS vehicle state node (publishes /robot_state, /battery_state, /amcl_pose)
+    vehicle_name_arg = DeclareLaunchArgument(
+        'vehicle_name', default_value='ackermann_robot',
+        description='Vehicle name for openTCS identification')
+    namespace_arg = DeclareLaunchArgument(
+        'namespace', default_value='',
+        description='ROS2 namespace for multi-vehicle support')
+
+    vehicle_namespace = LaunchConfiguration('namespace')
+    opentcs_vehicle = Node(
+        package='lidar_slam_nodes',
+        executable='opentcs_vehicle_node',
+        namespace=vehicle_namespace,
+        output='screen',
+        parameters=[opentcs_vehicle_config, {
+            'use_sim_time': True,
+            'vehicle_name': LaunchConfiguration('vehicle_name'),
+            'namespace': vehicle_namespace,
+        }],
+    )
+
+    # 15. RViz2 (was 15, now 16)
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
@@ -235,6 +259,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         set_gz_resource_path,
+        vehicle_name_arg,
+        namespace_arg,
         # Virtual serial port pair (must start first)
         socat,
         gz_sim,
@@ -250,12 +276,14 @@ def generate_launch_description():
         TimerAction(period=12.0, actions=[rs485_receiver, vehicle_controller]),
         # RS-485 bridge (1s after receiver, so it's ready to read)
         TimerAction(period=13.0, actions=[rs485_bridge]),
-        # Nav2
-        TimerAction(period=15.0, actions=[localization]),
-        TimerAction(period=25.0, actions=[navigation]),
+        # Nav2 (delayed: Gazebo needs time to stabilize under heavy CPU load)
+        TimerAction(period=25.0, actions=[localization]),
+        TimerAction(period=30.0, actions=[navigation]),
         # UI / teleop
         cmd_vel_bridge,
-        # openTCS bridge (after Nav2 action server is ready)
-        TimerAction(period=30.0, actions=[opentcs_bridge]),
+        # openTCS vehicle state node (after Nav2 action server is ready)
+        TimerAction(period=30.0, actions=[opentcs_vehicle]),
+        # Route graph loader (after route_server is up)
+        TimerAction(period=35.0, actions=[route_graph_loader]),
         rviz2,
     ])

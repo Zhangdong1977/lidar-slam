@@ -123,7 +123,7 @@
 
 | 参数位置 | 参数名称 | 旧值 | 新值 | 调整原因 |
 |----------|----------|------|------|----------|
-| `ekf_filter_node.ros__parameters` | `frequency` | `50.0` | `100.0` | 提高 EKF 更新频率，使 odom→body_link TF 发布更密集，减少 costmap 变换查询超时 |
+| `ekf_filter_node.ros__parameters` | `frequency` | `50.0` | `100.0` → `30.0` | 100Hz 导致 rviz2 Message Filter 队列溢出持续丢消息，30Hz 足够 nav2 使用 |
 | `ekf_filter_node.ros__parameters` | `odom0_queue_size` | `10` | `20` | 增大里程计数据缓冲，避免高频 EKF 下的数据丢失 |
 | `ekf_filter_node.ros__parameters` | `imu0_queue_size` | `10` | `20` | 增大 IMU 数据缓冲 |
 
@@ -867,3 +867,433 @@ Nav2 → cmd_vel_bridge → /steering_angle, /velocity → rs485_chassis_bridge
 | `src/lidar_slam_nodes/lidar_slam_nodes/rs485_chassis_receiver.py` | 接收端节点（串口→485帧→Float64） |
 | `config/rs485_bridge.yaml` | RS-485 桥接参数配置 |
 | `launch/sim_ackermann_rs485.launch.py` | 带 RS-485 协议仿真的导航 launch 文件 |
+
+---
+
+## 24. jvs-opentcs 车辆状态接口（2026/05/24）
+
+### 24.1 背景
+
+依据 jvs-opentcs ROS2 车辆状态与控制接口补充规范，新增 `opentcs_vehicle_node` 替代原 `opentcs_nav2_bridge`（仅 RS-485 场景），向 Sidecar 提供完整车辆运行状态。
+
+### 24.2 新增节点
+
+**opentcs_vehicle_node** (`src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py`)
+
+| Topic | 方向 | 类型 | 频率 | 说明 |
+|-------|------|------|------|------|
+| `/goal_pose` | 订阅 | PoseStamped | - | Sidecar 下发导航目标 |
+| `/odom` | 订阅 | Odometry | - | 速度提取 |
+| `/amcl_pose` | 订阅 | PoseWithCovarianceStamped | - | AMCL 协方差（定位质量） |
+| `/amcl_pose` | 发布 | PoseWithCovarianceStamped | 10Hz | TF→位姿，Sidecar 消费 |
+| `/robot_state` | 发布 | std_msgs/String (JSON) | 1Hz | 29+字段完整状态 |
+| `/battery_state` | 发布 | sensor_msgs/BatteryState | 1Hz | 仿真电量 |
+
+### 24.3 新增参数 (`config/opentcs_vehicle.yaml`)
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `vehicle_name` | "ackermann_robot" | 车辆名称，需与 JVS 一致 |
+| `access_identity` | "ackermann_robot" | 机器人访问标识 |
+| `namespace` | "" | ROS2 namespace |
+| `domain_id` | 42 | ROS_DOMAIN_ID |
+| `base_frame` | "body_link" | 机器人基座 frame |
+| `map_frame` | "map" | 地图 frame |
+| `pose_publish_rate` | 10.0 | 位姿发布频率 (Hz) |
+| `status_sample_ms` | 1000 | 状态发布间隔 (ms) |
+| `heartbeat_timeout_ms` | 30000 | 心跳超时 (ms) |
+| `cancel_timeout_ms` | 5000 | 取消超时 (ms) |
+| `max_speed` | 1.4 | 最大速度 (m/s) |
+| `battery_sim_enabled` | true | 是否启用电池仿真 |
+| `battery_sim_start_percent` | 95.0 | 仿真电池初始电量 (%) |
+| `battery_sim_drain_rate` | 5.0 | 仿真电池衰减速率 (%/小时) |
+
+### 24.4 状态机
+
+- `state`: IDLE ⇄ WORKING ⇄ ERROR
+- `dispatchStatus`: UNKNOWN → ACCEPTED → EXECUTING → SUCCEEDED/CANCELED/ABORTED
+- `localizationStatus`: INITIALIZING → OK / DEGRADED / LOST（基于 AMCL 协方差）
+
+### 24.5 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/lidar_slam_nodes/setup.py` | 新增 opentcs_vehicle_node entry_point |
+| `launch/sim_ackermann_rs485.launch.py` | 替换 opentcs_bridge → opentcs_vehicle |
+
+注：`opentcs_nav2_bridge.py` 保留，`sim_ackermann_opentcs.launch.py` 不受影响。
+
+---
+
+## 25. openTCS Sidecar ROS2 侧补充开发（2026/05/25）
+
+### 25.1 背景
+
+依据 `docs/jvs-opentcs-ros2-sidecar-ros2-side-needs-2026-05-25.md` 需求文档，对 `opentcs_vehicle_node` 进行功能补充，解决安全信号为占位值、orderId 无法关联、电池仅仿真等问题。
+
+### 25.2 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py` | 全部功能变更 |
+| `config/opentcs_vehicle.yaml` | 新增 12 个参数 |
+| `config/nav2_params_opentcs.yaml` | 启用 collision_monitor |
+| `launch/sim_ackermann_rs485.launch.py` | 添加 vehicle_name/namespace launch 参数 |
+
+### 25.3 P0: orderId 关联
+
+| 变更 | 说明 |
+|------|------|
+| `_goal_cb()` 解析 frame_id | 格式 `map/orderId=TO-xxx`，解析后还原 frame_id 为 `map` |
+| `_result_cb()` 清空 orderId | goal 结束后清除 `_current_order_id` |
+| 新参数 `goal_order_id_parse` | 默认 true，可关闭 frame_id 解析 |
+
+### 25.4 P1: 安全信号 + 障碍物检测
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `emergency_stop_topic` | "" | 急停 topic（std_msgs/Bool），空=不订阅 |
+| `safety_stop_topic` | "" | 安全停车 topic（std_msgs/Bool），空=不订阅 |
+| `obstacle_detection_mode` | "collision_monitor" | `collision_monitor`/`scan`/`disabled` |
+| `obstacle_scan_threshold` | 0.5 | scan 模式障碍物距离阈值 (m) |
+| `obstacle_scan_angle_window` | 1.047 | scan 模式前方角度窗口 (rad, ~60°) |
+
+**nav2_params_opentcs.yaml 修改**：
+- `collision_monitor.FootprintApproach.enabled`: `False` → `True`
+- `lifecycle_manager_navigation.node_names`: 添加 `'collision_monitor'`
+
+### 25.5 P1: 实车电池接入
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `battery_real_topic` | "/battery_state_real" | 实车 BMS 电池 topic |
+
+当 `battery_sim_enabled: false` 时订阅该 topic，1Hz 定时转发真实数据。
+
+### 25.6 P2: 可配置订阅 + namespace
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `odom_topic` | "/odom" | 原硬编码 `/odom`，现可配置 |
+| `amcl_subscribe_topic` | "/amcl_pose" | 原硬编码 `/amcl_pose`，现可配置 |
+
+launch 文件新增 `vehicle_name` 和 `namespace` 参数，通过 ROS2 原生 namespace 机制支持多车。
+
+### 25.7 P2: 位置字段
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `position_report_topic` | "" | 位置报告 topic（std_msgs/String JSON），空=不订阅 |
+
+robot_state JSON 新增 `currentPosition`、`lastNodeId`、`nextPosition` 字段。
+
+### 25.8 P3: 地图 checksum
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `map_yaml_file` | "" | 地图 YAML 文件路径，非空时计算 PGM SHA256 前 16 位 |
+
+robot_state JSON 新增 `mapChecksum` 字段。
+
+### 25.9 补充修复
+
+| 变更 | 说明 |
+|------|------|
+| `maxSpeed` 加入 JSON | 原 `max_speed` 参数声明但未使用，现输出到 robot_state |
+| heartbeat 超时检测 | `_goal_cb` 记录最后 goal 时间，`_check_localization` 每 2s 检查超时并 log warn |
+
+### 25.10 config/opentcs_vehicle.yaml 完整新增参数
+
+```yaml
+# P0
+goal_order_id_parse: true
+
+# P1 安全
+emergency_stop_topic: ""
+safety_stop_topic: ""
+obstacle_detection_mode: "collision_monitor"
+obstacle_scan_threshold: 0.5
+obstacle_scan_angle_window: 1.047
+
+# P1 电池
+battery_real_topic: "/battery_state_real"
+
+# P2 可配置订阅
+odom_topic: "/odom"
+amcl_subscribe_topic: "/amcl_pose"
+
+# P2 位置
+position_report_topic: ""
+
+# P3 地图
+map_yaml_file: ""
+
+# 自动恢复
+error_auto_recover_ms: 10000   # ERROR状态持续10秒后自动恢复IDLE
+```
+
+---
+
+## 九、Nav2 lifecycle_manager 启动失败修复 (2026-05-26)
+
+### 9.1 问题
+
+`sim_ackermann_rs485.launch.py` 启动后，在 RViz 中设置目标点小车不动。
+原因：Nav2 导航生命周期节点未被 lifecycle_manager 激活。
+
+### 9.2 根因
+
+1. **Fast-DDS RMW 响应超时**：Gazebo 高负载（GUI 占 212% CPU）下，controller_server 的 `change_state` 服务响应在 RMW 层超时，导致 lifecycle_manager 放弃后续节点启动
+2. **service_call_timeout 未生效**：标准 `navigation_launch.py` 不把 `params_file` 传给 lifecycle_manager 节点，所以 yaml 中的 `service_call_timeout: 30000` 从未加载
+3. **route_server 无配置**：Nav2 Jazzy 的 `navigation_launch.py` 新增了 `route_server` 和 `docking_server`，但 nav2_params 中缺少 `route_server` 配置段
+
+### 9.3 修改内容
+
+| 文件 | 修改 | 原因 |
+|------|------|------|
+| `launch/navigation_custom.launch.py` | 新建自定义 navigation launch | lifecycle_manager 接收 configured_params，使 service_call_timeout 生效 |
+| `launch/sim_ackermann_rs485.launch.py` | 用 navigation_custom 替换标准 navigation_launch | 使用自定义 launch |
+| `launch/sim_ackermann_rs485.launch.py` | navigation 启动延迟 25s → 30s | 给 Gazebo 更多稳定时间 |
+| `config/nav2_params_opentcs.yaml` | service_call_timeout: 30000 → 60000 | 增加超时容忍度 |
+| `config/nav2_params_opentcs.yaml` | lifecycle_manager node_names 加入 route_server/docking_server | 与 navigation_launch.py 实际列表一致 |
+| `config/nav2_params_opentcs.yaml` | 添加 route_server 配置段 | Nav2 Jazzy 新增节点需要默认配置 |
+| `config/nav2_params_opentcs.yaml` | 添加 bond_timeout/attempt_respawn_reconnection | 增强生命周期管理鲁棒性 |
+
+### 9.4 route_server 崩溃修复 (2026-05-26)
+
+**日志**: `log/rs485_2026-05-26_15-01-10.log`
+
+**错误**: `parameter_value_from failed for parameter 'route_files': No parameter value set` → exit code -6 (SIGABRT)
+
+**根因**: route_server 配置段参数名和插件名全部错误：
+- `route_files` → 不存在的参数，正确为 `graph_filepath`
+- `GoalPose`/`TraverseRoute`/`Validator` → 不存在的插件，正确为 `DistanceScorer`/`DynamicEdgesScorer`/`AdjustSpeedLimit`/`ReroutingService`
+
+| 参数 | 旧值（错误） | 新值（正确） | 原因 |
+|------|-------------|-------------|------|
+| `route_files` | `[]` | (删除) | 不存在的参数名，导致启动时抛出 InvalidParameterValueException |
+| `base_frame` | (缺失) | `"body_link"` | 与项目其他节点一致 |
+| `route_frame` | (缺失) | `"map"` | 全局坐标系 |
+| `graph_filepath` | (缺失) | `""` | 暂无路由图文件，空值允许启动后通过 set_graph service 加载 |
+| `graph_file_loader` | (缺失) | `"GeoJsonGraphFileLoader"` | 官方默认的 GeoJSON 图加载器 |
+| `edge_cost_functions` | (缺失) | `["DistanceScorer", "DynamicEdgesScorer"]` | 官方默认边评分器 |
+| `operations` | (缺失) | `["AdjustSpeedLimit", "ReroutingService"]` | 官方默认路由操作 |
+| `GoalPose` 插件 | `nav2_route::GoalPoseOperation` | (删除) | 不存在的插件类 |
+| `TraverseRoute` 插件 | `nav2_route::TraverseRouteOperation` | (删除) | 不存在的插件类 |
+| `Validator` 插件 | `nav2_route::RouteValidator` | (删除) | 不存在的插件类 |
+
+### 9.5 新增 route_graph_loader 节点 (2026-05-26)
+
+**目的**：接收 Sidecar 发布的 GeoJSON 路由图，保存到文件并调用 route_server 的 `SetRouteGraph` 服务加载。
+
+**数据流**：
+```
+Sidecar → /route_graph (std_msgs/String, Transient Local) → route_graph_loader
+  → 保存 /tmp/route_graph.geojson → 调用 route_server/set_route_graph 服务
+```
+
+| 文件 | 说明 |
+|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/route_graph_loader.py` | 新节点 |
+| `src/lidar_slam_nodes/setup.py` | 新增 entry_point |
+| `launch/sim_ackermann_rs485.launch.py` | 35s 延迟启动（route_server 30s 启动后） |
+
+**节点参数**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `graph_save_path` | `/tmp/route_graph.geojson` | GeoJSON 文件保存路径 |
+| `set_graph_service` | `route_server/set_route_graph` | route_server 的 set_graph 服务名 |
+| `service_timeout` | `30.0` | 等待服务就绪的超时 |
+
+**接口文档**：`docs/jvs-opentcs-ros2-sidecar-route-graph-topic-2026-05-26.md`
+
+---
+
+## 26. lifecycle_manager_localization 启动修复 (2026-05-27)
+
+### 根因
+
+`sim_ackermann_rs485.sh` 启动后 RViz 提示 map 不存在。日志显示 `map_server` 成功加载地图但发送 lifecycle `change_state` 服务响应时 FastRTPS 超时：
+
+```
+[map_server] [WARN]: failed to send response to /map_server/change_state (timeout)
+```
+
+`lifecycle_manager_localization` 随后卡住，无法完成 Configure → Activate 流程。对比之前成功运行的日志，确认为间歇性问题，由 Gazebo 启动期间的高 CPU 负载触发。
+
+### 26.1 launch/sim_ackermann_rs485.launch.py
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| localization TimerAction delay | 15s | 25s | 给 Gazebo 更多时间稳定，减少高负载下 FastRTPS 响应超时 |
+
+### 26.2 config/nav2_params_opentcs.yaml
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `lifecycle_manager_localization.service_call_timeout` | 30000 | 60000 | 增加超时容忍度，与 navigation lifecycle_manager 一致 |
+| `lifecycle_manager_localization.bond_timeout` | (缺失) | 10.0 | 添加 bond 超时检测 |
+| `lifecycle_manager_localization.bond_heartbeat_period` | (缺失) | 0.1 | 心跳间隔 |
+| `lifecycle_manager_localization.attempt_respawn_reconnection` | (缺失) | true | 允许节点断连后自动重连 |
+
+---
+
+## 27. 修复启动后 map 不存在 + 车辆不移动
+
+日期：2026-05-27
+
+### 27.1 新建 launch/localization_custom.launch.py
+
+| 变更 | 原因 |
+|------|------|
+| 参照 navigation_custom.launch.py 模式创建 | 标准 localization_launch.py 不向 lifecycle_manager 传递 configured_params，导致 service_call_timeout 未生效，FastDDS RMW 超时后 map_server 卡在 inactive |
+| lifecycle_manager_localization 接收 configured_params | 使 nav2_params_opentcs.yaml 中的 service_call_timeout: 60000 生效 |
+
+### 27.2 launch/sim_ackermann_rs485.launch.py
+
+| 变更 | 原因 |
+|------|------|
+| localization 改用 localization_custom.launch.py | 修复 map_server lifecycle 超时问题 |
+
+### 27.3 launch/navigation_custom.launch.py
+
+| 变更 | 原因 |
+|------|------|
+| bt_navigator 添加 remapping `goal_pose → _unused_goal_pose` | 禁用 bt_navigator 的 /goal_pose 订阅，避免与 opentcs_vehicle_node 和远程 opentcs_nav2_bridge 三路竞争导致导航目标被反复取消 |
+
+---
+
+## 28. 修复 Sidecar 与 Vehicle Node 话题不匹配 + Nav2 use_sim_time 缺失 (2026-05-27)
+
+### 28.1 根因
+
+Sidecar (`jvs_opentcs_ros2_sidecar`) 使用 `vehicle_name=ackermann_robot` 作为话题前缀，发布到 `/ackermann_robot/goal_pose`，订阅 `/ackermann_robot/robot_state` 和 `/ackermann_robot/battery_state`。但 `opentcs_vehicle_node` 的话题参数配置为非命名空间路径（`/goal_pose`、`/robot_state`、`/battery_state`），导致：
+
+- Sidecar 发布的目标 → 无人接收（subscription count = 0）
+- Vehicle node 发布的状态 → Sidecar 收不到
+
+此外，Nav2 多个节点（planner_server、controller_server 等）缺少 `use_sim_time: True`，导致仿真时钟不同步，NavigateToPose action 接受目标后立即返回 SUCCEEDED（实际未移动）。
+
+同时 `opentcs_nav2_bridge` 与 `opentcs_vehicle_node` 功能完全重复（都订阅 goal_pose → 调用 NavigateToPose），在同一 launch 中同时运行会导致同一个目标被发送两次到 Nav2。
+
+### 28.2 config/opentcs_vehicle.yaml
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `goal_pose_topic` | `/goal_pose` | `/ackermann_robot/goal_pose` | 匹配 Sidecar 发布的话题名 |
+| `robot_state_topic` | `/robot_state` | `/ackermann_robot/robot_state` | 匹配 Sidecar 订阅的话题名 |
+| `battery_state_topic` | `/battery_state` | `/ackermann_robot/battery_state` | 匹配 Sidecar 订阅的话题名 |
+
+注：`amcl_pose_topic` 和 `amcl_subscribe_topic` 保持 `/amcl_pose` 不变，Sidecar 从 `/ackermann_robot/robot_state` JSON 获取位姿，不直接订阅 amcl_pose。
+
+### 28.3 config/nav2_params_opentcs.yaml
+
+为以下节点添加 `use_sim_time: True`：
+
+| 节点 | 原值 | 新值 | 原因 |
+|------|------|------|------|
+| `bt_navigator` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `controller_server` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `local_costmap` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `global_costmap` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `planner_server` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `smoother_server` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `behavior_server` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `waypoint_follower` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `velocity_smoother` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `collision_monitor` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `docking_server` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+| `route_server` | 无 | `use_sim_time: True` | 仿真时钟同步 |
+
+### 28.4 launch/sim_ackermann_opentcs.launch.py
+
+| 变更 | 原因 |
+|------|------|
+| 移除 `opentcs_nav2_bridge` 节点及其 TimerAction | 与 `opentcs_vehicle_node` 功能完全重复（都订阅 goal_pose → 调用 NavigateToPose），同时运行导致同一目标被发送两次到 Nav2 |
+
+### 28.6 删除 opentcs_nav2_bridge.py
+
+| 文件 | 操作 | 原因 |
+|------|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_nav2_bridge.py` | 删除 | 功能已被 opentcs_vehicle_node 完全覆盖，所有 launch 文件均已不引用 |
+| `src/lidar_slam_nodes/setup.py` | 移除 entry_point | 对应源码已删除 |
+
+### 28.5 遗留问题
+
+- `/ackermann_robot/navigate_to_pose` action 无 server（Sidecar 是唯一 client），Sidecar 直接调用该 action 会失败。需通过话题方式（goal_pose）下发目标
+- Route graph GeoJSON 边缺少 `start/end` 节点引用（均为 None），导致 `/compute_and_track_route` action 返回错误码 400
+- Planner 使用 NavfnPlanner（自由空间规划），未接入 route_server 的图路径规划
+
+---
+
+## 29. 机器人名称可配置化：动态构建 Sidecar Topic (2026-05-27)
+
+### 29.1 根因
+
+Sidecar 端订阅 `/{vehicle_name}/amcl_pose` 等带机器人名称前缀的 topic，但 `opentcs_vehicle_node` 的 AMCL pose 发布在 `/amcl_pose`（全局 topic，无前缀），导致 sidecar 收不到位姿信息。同时 `goal_pose`、`robot_state`、`battery_state` 等 topic 中 `ackermann_robot` 是硬编码在 YAML 字符串里的，不同机器人需要手动修改多处配置。
+
+附带修复：Nav2 AMCL 和 vehicle_node 都发布到 `/amcl_pose`（同一 topic 竞争），修改后 vehicle_node 发布到 `/{vehicle_name}/amcl_pose`，不再冲突。
+
+### 29.2 src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py
+
+| 变更 | 说明 |
+|------|------|
+| 调整参数声明顺序 | 先声明并读取 `vehicle_name`，再声明 sidecar topic 参数 |
+| sidecar topic 默认值动态构建 | `amcl_pose_topic` → `/{vehicle_name}/amcl_pose`，`goal_pose_topic` → `/{vehicle_name}/goal_pose`，`robot_state_topic` → `/{vehicle_name}/robot_state`，`battery_state_topic` → `/{vehicle_name}/battery_state` |
+| Nav2/内部 topic 保持不变 | `amcl_subscribe_topic` → `/amcl_pose`，`nav_action_name` → `/navigate_to_pose`，`odom_topic` → `/odom` |
+
+### 29.3 config/opentcs_vehicle.yaml
+
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `amcl_pose_topic` | `/amcl_pose` | (移除) | 由代码从 vehicle_name 动态构建 |
+| `goal_pose_topic` | `/ackermann_robot/goal_pose` | (移除) | 同上 |
+| `robot_state_topic` | `/ackermann_robot/robot_state` | (移除) | 同上 |
+| `battery_state_topic` | `/ackermann_robot/battery_state` | (移除) | 同上 |
+
+只需配置 `vehicle_name: "ackermann_robot"`，所有 sidecar topic 自动添加前缀。YAML 中仍可显式设置这些 topic 参数覆盖默认值。
+
+---
+
+## 30. 统一 goal_pose 和 initialpose 话题命名 (2026-05-27)
+
+### 30.1 根因
+
+RViz 的 "2D Nav Goal" 工具发布到 `/goal_pose`，"2D Pose Estimate" 发布到 `/initialpose`，均为全局 topic 无 vehicle_name 前缀。而 `opentcs_vehicle_node` 订阅 `/ackermann_robot/goal_pose`，AMCL 订阅 `/initialpose`（C++ 硬编码）。多机器人场景下这些全局 topic 会混淆。
+
+### 30.2 修改文件
+
+#### RViz 配置文件
+
+| 文件 | Topic | 旧值 | 新值 |
+|------|-------|------|------|
+| `config/nav.rviz` | initialpose | `/initialpose` | `/ackermann_robot/initialpose` |
+| `config/nav.rviz` | goal_pose | `/goal_pose` | `/ackermann_robot/goal_pose` |
+| `config/slam.rviz` | initialpose | `/initialpose` | `/ackermann_robot/initialpose` |
+| `config/slam.rviz` | goal_pose | `/goal_pose` | `/ackermann_robot/goal_pose` |
+| `config/explore.rviz` | goal_pose | `/goal_pose` | `/ackermann_robot/goal_pose` |
+
+#### launch/localization_custom.launch.py
+
+| 变更 | 说明 |
+|------|------|
+| 新增 `vehicle_name` launch argument | 默认 `'ackermann_robot'` |
+| AMCL remappings 添加 `('initialpose', ['/', vehicle_name, '/initialpose'])` | 将 AMCL 的 initialpose 订阅 remap 到 `/{vehicle_name}/initialpose` |
+
+#### launch/sim_ackermann_rs485.launch.py
+
+| 变更 | 说明 |
+|------|------|
+| localization launch_arguments 添加 `'vehicle_name': LaunchConfiguration('vehicle_name')` | 将 vehicle_name 传递给 localization_custom |
+
+### 30.3 Topic 统一结果
+
+| Topic | 发布者 | 订阅者 |
+|-------|--------|--------|
+| `/ackermann_robot/goal_pose` | RViz + Sidecar | opentcs_vehicle_node |
+| `/ackermann_robot/initialpose` | RViz | AMCL |
+| `/ackermann_robot/amcl_pose` | opentcs_vehicle_node | Sidecar |
+| `/ackermann_robot/robot_state` | opentcs_vehicle_node | Sidecar |
+| `/ackermann_robot/battery_state` | opentcs_vehicle_node | Sidecar |
+| `/amcl_pose`（内部） | Nav2 AMCL | opentcs_vehicle_node（取协方差） |

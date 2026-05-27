@@ -28,9 +28,11 @@ setup(
             'sim_teleop = lidar_slam_nodes.sim_teleop:main',
             'load_controllers = lidar_slam_nodes.load_controllers:main',
             'scan_range_filter = lidar_slam_nodes.scan_range_filter:main',
-            'opentcs_nav2_bridge = lidar_slam_nodes.opentcs_nav2_bridge:main',
+
             'rs485_chassis_bridge = lidar_slam_nodes.rs485_chassis_bridge:main',
             'rs485_chassis_receiver = lidar_slam_nodes.rs485_chassis_receiver:main',
+            'opentcs_vehicle_node = lidar_slam_nodes.opentcs_vehicle_node:main',
+            'route_graph_loader = lidar_slam_nodes.route_graph_loader:main',
         ],
     },
 )

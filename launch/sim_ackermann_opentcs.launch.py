@@ -125,18 +125,7 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
-    # 9. openTCS-Nav2 bridge: /goal_pose -> NavigateToPose, TF -> /amcl_pose
-    opentcs_bridge = Node(
-        package='lidar_slam_nodes',
-        executable='opentcs_nav2_bridge',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'pose_publish_rate': 10.0,
-        }],
-    )
-
-    # 10. RViz2
+    # 9. RViz2
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
@@ -168,10 +157,5 @@ def generate_launch_description():
             actions=[navigation],
         ),
         cmd_vel_bridge,
-        # Bridge starts after Nav2 action server is ready
-        TimerAction(
-            period=30.0,
-            actions=[opentcs_bridge],
-        ),
         rviz2,
     ])
