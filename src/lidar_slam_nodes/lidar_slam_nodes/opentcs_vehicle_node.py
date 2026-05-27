@@ -22,7 +22,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, OccupancyGrid
 from nav2_msgs.action import NavigateToPose
 from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import Bool, String
@@ -114,6 +114,9 @@ class OpentcsVehicleNode(Node):
         self.declare_parameter('position_report_topic', '')
         self.declare_parameter('map_yaml_file', '')
         self.declare_parameter('error_auto_recover_ms', 10000)
+        self.declare_parameter('goal_bounds_check_enabled', True)
+        self.declare_parameter('goal_bounds_tolerance', 0.5)
+        self.declare_parameter('goal_reject_unknown_cost', True)
 
         # Load parameters
         self._vehicle_name = self.get_parameter('vehicle_name').value
@@ -144,6 +147,7 @@ class OpentcsVehicleNode(Node):
         self._distance_remaining = 0.0
         self._estimated_time_remaining = 0.0
         self._cancel_timeout_s = cancel_timeout_s
+        self._goal_generation = 0
 
         # Pose from TF
         self._pose_x = 0.0
@@ -186,6 +190,10 @@ class OpentcsVehicleNode(Node):
         # ERROR auto-recovery
         self._error_auto_recover_s = self.get_parameter('error_auto_recover_ms').value / 1000.0
         self._error_enter_time = 0.0
+
+        # 全局代价地图缓存（目标点边界校验）
+        self._costmap_info = None
+        self._costmap_data = None
 
         # Map checksum
         self._map_checksum = self._compute_map_checksum(
@@ -252,6 +260,11 @@ class OpentcsVehicleNode(Node):
             self.create_subscription(String, pos_report_topic,
                                      self._position_report_cb, 10)
 
+        # 全局代价地图订阅（目标点边界校验）
+        self.create_subscription(
+            OccupancyGrid, '/global_costmap/costmap',
+            self._global_costmap_cb, 1)
+
         # --- Action client ---
         action_name = self.get_parameter('nav_action_name').value
         self._action_client = ActionClient(self, NavigateToPose, action_name)
@@ -272,6 +285,57 @@ class OpentcsVehicleNode(Node):
     # =========================================================================
     # Subscriptions
     # =========================================================================
+
+    def _global_costmap_cb(self, msg: OccupancyGrid):
+        self._costmap_info = msg.info
+        self._costmap_data = msg.data
+
+    def _validate_goal_in_costmap(self, x: float, y: float) -> tuple:
+        """检查目标点是否在全局代价地图有效范围内。"""
+        if not self.get_parameter('goal_bounds_check_enabled').value:
+            return True, ''
+
+        if self._costmap_info is None:
+            self.get_logger().warn(
+                '全局代价地图缓存尚未建立，跳过边界检查',
+                throttle_duration_sec=30.0)
+            return True, ''
+
+        info = self._costmap_info
+        origin_x = info.origin.position.x
+        origin_y = info.origin.position.y
+        resolution = info.resolution
+        map_max_x = origin_x + info.width * resolution
+        map_max_y = origin_y + info.height * resolution
+
+        tolerance = self.get_parameter('goal_bounds_tolerance').value
+
+        if (x < origin_x + tolerance or x > map_max_x - tolerance or
+                y < origin_y + tolerance or y > map_max_y - tolerance):
+            reason = (f'目标点 ({x:.2f}, {y:.2f}) 超出地图边界 '
+                      f'x=[{origin_x:.2f}, {map_max_x:.2f}], '
+                      f'y=[{origin_y:.2f}, {map_max_y:.2f}], '
+                      f'容忍度={tolerance:.2f}m')
+            return False, reason
+
+        if self.get_parameter('goal_reject_unknown_cost').value and self._costmap_data:
+            cell_x = int((x - origin_x) / resolution)
+            cell_y = int((y - origin_y) / resolution)
+            cell_x = max(0, min(cell_x, info.width - 1))
+            cell_y = max(0, min(cell_y, info.height - 1))
+            idx = cell_y * info.width + cell_x
+            if idx < len(self._costmap_data):
+                cost = self._costmap_data[idx]
+                if cost < 0:
+                    reason = (f'目标点 ({x:.2f}, {y:.2f}) 位于未知区域 '
+                              f'(cost={cost})')
+                    return False, reason
+                if cost >= 90:
+                    reason = (f'目标点 ({x:.2f}, {y:.2f}) 位于障碍区域 '
+                              f'(cost={cost})')
+                    return False, reason
+
+        return True, ''
 
     def _odom_cb(self, msg: Odometry):
         self._linear_velocity = msg.twist.twist.linear.x
@@ -344,10 +408,25 @@ class OpentcsVehicleNode(Node):
     # =========================================================================
 
     def _goal_cb(self, msg: PoseStamped):
+        self.get_logger().info(
+            f'Goal received on {self.get_parameter("goal_pose_topic").value}: '
+            f'({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f}), '
+            f'current_state={self._state}, dispatch={self._dispatch_status}')
+
         if not self._action_client.wait_for_server(timeout_sec=2.0):
             self.get_logger().warn('NavigateToPose action server not available')
             self._set_dispatch(DispatchStatus.REJECTED)
             self._set_fault('NAV2_UNAVAILABLE', 'NavigateToPose action server not available')
+            return
+
+        # 目标点地图边界校验
+        goal_x = msg.pose.position.x
+        goal_y = msg.pose.position.y
+        is_valid, reason = self._validate_goal_in_costmap(goal_x, goal_y)
+        if not is_valid:
+            self.get_logger().warn(reason)
+            self._set_dispatch(DispatchStatus.REJECTED)
+            self._set_fault('GOAL_OUT_OF_BOUNDS', reason)
             return
 
         # Parse orderId from frame_id (format: "map/orderId=TO-xxx")
@@ -362,6 +441,7 @@ class OpentcsVehicleNode(Node):
             self._current_order_id = ''
 
         self._last_goal_time = time.monotonic()
+        self._goal_generation += 1
 
         # Cancel previous goal if active
         if self._goal_handle is not None:
@@ -391,7 +471,15 @@ class OpentcsVehicleNode(Node):
         self._send_goal_future.add_done_callback(self._goal_response_cb)
 
     def _goal_response_cb(self, future):
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().error(f'send_goal_async failed: {e}')
+            self._set_dispatch(DispatchStatus.REJECTED)
+            self._set_fault('SEND_GOAL_FAILED', str(e))
+            self._set_state(VehicleState.ERROR)
+            self._goal_handle = None
+            return
         if not goal_handle.accepted:
             self.get_logger().warn(f'Goal {self._current_goal_id} rejected by Nav2')
             self._set_dispatch(DispatchStatus.REJECTED)
@@ -403,7 +491,10 @@ class OpentcsVehicleNode(Node):
         self._goal_handle = goal_handle
         self._set_dispatch(DispatchStatus.EXECUTING)
         self.get_logger().info(f'Goal {self._current_goal_id} accepted, EXECUTING')
-        goal_handle.get_result_async().add_done_callback(self._result_cb)
+        gen = self._goal_generation
+        goal_handle.get_result_async().add_done_callback(
+            lambda future: self._result_cb(future, gen)
+        )
 
     def _feedback_cb(self, feedback_msg):
         feedback = feedback_msg.feedback
@@ -411,7 +502,10 @@ class OpentcsVehicleNode(Node):
         etr = feedback.estimated_time_remaining
         self._estimated_time_remaining = etr.sec + etr.nanosec * 1e-9
 
-    def _result_cb(self, future):
+    def _result_cb(self, future, generation):
+        if generation != self._goal_generation:
+            return
+
         result = future.result()
         status = result.status
         self.get_logger().info(f'Goal {self._current_goal_id} finished with status: {status}')
@@ -442,6 +536,8 @@ class OpentcsVehicleNode(Node):
             self._set_dispatch(DispatchStatus.CANCELING)
             self._goal_handle.cancel_goal_async()
             self._goal_handle = None
+            self._current_goal_id = ''
+            self._current_order_id = ''
 
     def cancel_current_goal(self):
         self._cancel_goal_internal()

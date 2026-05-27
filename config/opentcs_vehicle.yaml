@@ -34,3 +34,6 @@ opentcs_vehicle_node:
     position_report_topic: ""
     map_yaml_file: ""
     error_auto_recover_ms: 10000
+    goal_bounds_check_enabled: true
+    goal_bounds_tolerance: 0.5
+    goal_reject_unknown_cost: true

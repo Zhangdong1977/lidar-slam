@@ -1297,3 +1297,116 @@ RViz 的 "2D Nav Goal" 工具发布到 `/goal_pose`，"2D Pose Estimate" 发布�
 | `/ackermann_robot/robot_state` | opentcs_vehicle_node | Sidecar |
 | `/ackermann_robot/battery_state` | opentcs_vehicle_node | Sidecar |
 | `/amcl_pose`（内部） | Nav2 AMCL | opentcs_vehicle_node（取协方差） |
+
+---
+
+## 31. 目标点竞态条件修复 + RPP 绕圈问题 (2026/05/27)
+
+### 31.1 问题描述
+
+通过 `ros2 topic pub --once /ackermann_robot/goal_pose ...` 发布新目标点时，机器人没有切换到新目标，继续围着旧目标点转圈。
+
+根因：
+1. `_result_cb` 竞态条件：旧目标取消后的结果回调会覆盖新目标的 `_goal_handle` 和状态，导致节点认为没有活跃目标
+2. RPP 控制器振荡：Ackermann 车辆无法原地旋转，但 `yaw_goal_tolerance: 0.25` (14.3°) 过于严格，导致机器人绕目标转圈无法到达
+
+### 31.2 修复内容
+
+**opentcs_vehicle_node.py** — 代际计数器防竞态：
+- 添加 `_goal_generation` 单调递增计数器
+- `_goal_cb` 每次收到新目标时递增代际
+- `_goal_response_cb` 用闭包捕获代际传递给 `_result_cb`
+- `_result_cb` 检查代际匹配，过期回调直接忽略
+- `_cancel_goal_internal` 取消时立即清理 `_current_goal_id` 和 `_current_order_id`
+
+**nav2_params_opentcs.yaml** — 放宽目标容差：
+| 参数 | 旧值 | 新值 |
+|------|------|------|
+| `xy_goal_tolerance` | 0.25 | 0.30 |
+| `yaw_goal_tolerance` | 0.25 | 0.50 |
+| `use_rotate_to_heading` | (未设置) | false |
+
+**ackermann_nav.xml** — 减少恢复重试：
+- `number_of_retries`: 6 → 3
+
+**opentcs_vehicle_node.py** — 防护增强：
+- `_goal_response_cb` 添加 try-except，防止 `future.result()` 异常导致节点卡死
+- `_goal_cb` 开头添加诊断日志，记录收到目标时的状态
+
+---
+
+## 32. 第二次导航无响应 — BT 时序 + 代价地图修复 (2026/05/27)
+
+### 32.1 问题描述
+
+第一次导航到 (13, 0) 成功后，第二次发送目标 (-13, 0) 时机器人无响应。日志显示：
+- 规划器找到路径（RViz 可见终点在 (-13,0)），但路径起点不在机器人位置
+- 控制器报 `Resulting plan has 0 poses in it`，5秒后中止
+- BT 恢复被 `WouldAControllerRecoveryHelp` 条件跳过，没有重试
+
+根因：
+1. **全局代价地图阻挡**：机器人到达 (13,0) 后，障碍层在附近标记障碍物，膨胀层覆盖了机器人位置，规划器无法从机器人位置开始
+2. **BT 时序问题**：`RateController hz="0.1"` 导致规划器 10 秒才更新一次，`PipelineSequence` 在规划完成前就 tick 了 FollowPath，发送空路径
+3. **恢复被跳过**：空路径错误不触发恢复条件检查，BT 直接放弃
+
+### 32.2 修复内容
+
+**ackermann_nav.xml** — BT 行为树：
+| 修改 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `RateController hz` | 0.1 | 1.0 | 标准Nav2值，每秒重规划，避免空路径时序问题 |
+| `ComputePathToPose` 重试次数 | 1 | 2 | 增加规划重试机会 |
+| `FollowPath` 重试次数 | 1 | 2 | 增加控制重试机会 |
+| 恢复条件检查 | `Fallback{WouldA*RecoveryHelp...}` | 移除，改用 `ReactiveFallback` | 确保恢复动作始终执行，不被错误码条件跳过 |
+
+**nav2_params_opentcs.yaml** — 全局代价地图障碍层：
+| 参数 | 旧值 | 新值 | 原因 |
+|------|------|------|------|
+| `raytrace_max_range` | 3.0 | 5.0 | 扩大射线清除范围，减少陈旧障碍 |
+| `obstacle_max_range` | 2.5 | 3.5 | 扩大障碍标记范围 |
+| `obstacle_min_range` | 0.0 | 0.3 | 过滤近距离噪声，防止自身标记为障碍 |
+
+---
+
+## 33. 目标点地图边界校验（2026-05-27）：防止越界目标触发物理移动
+
+### 33.1 背景
+
+当 Sidecar 下发超出地图边界的目标坐标（如 x=115 而地图仅延伸到 ~50），`opentcs_vehicle_node` 直接将目标转发给 Nav2。Nav2 规划器立即报错 `"Goal Coordinates outside bounds"`，但 BT 的 recovery 行为（BackUp 3.5m、BackUp 2.0m）会让小车物理后退多次后才最终失败（最多 3 轮 × 2 次 BackUp = 6 次物理后退）。
+
+### 33.2 方案
+
+订阅 `/global_costmap/costmap`（OccupancyGrid）缓存地图元数据，在 `_goal_cb` 中发送 Nav2 目标前进行边界和代价验证。越界目标直接 REJECTED，不发送给 Nav2，小车完全不动。
+
+### 33.3 新增参数 (`config/opentcs_vehicle.yaml`)
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `goal_bounds_check_enabled` | true | 是否启用目标点边界检查 |
+| `goal_bounds_tolerance` | 0.5 | 边界内缩容忍距离 (m)，目标点距地图边界小于此值也被拒绝 |
+| `goal_reject_unknown_cost` | true | 是否同时拒绝未知/障碍区域上的目标点 |
+
+### 33.4 验证逻辑
+
+1. 检查全局代价地图缓存是否已建立（首次启动约 1 秒后可用）
+2. 计算地图边界：`[origin_x, origin_x + width × resolution] × [origin_y, origin_y + height × resolution]`
+3. 目标点必须在边界内缩 `goal_bounds_tolerance` 米的范围内
+4. 若 `goal_reject_unknown_cost=true`，检查目标点所在格子代价值：-1（未知）或 >= 90（障碍）则拒绝
+5. 验证失败：`DispatchStatus.REJECTED` + fault code `GOAL_OUT_OF_BOUNDS`，状态保持 IDLE
+6. 代价地图缓存不可用时：降级通过，记录警告日志（30 秒节流），由 Nav2 自身处理
+
+### 33.5 数据流
+
+```
+Nav2 global_costmap → /global_costmap/costmap (OccupancyGrid) → _global_costmap_cb → _costmap_info + _costmap_data
+Sidecar → /ackermann_robot/goal_pose → _goal_cb → _validate_goal_in_costmap(缓存) → [通过] → NavigateToPose
+                                                                  → [拒绝] → REJECTED + IDLE
+```
+
+### 33.6 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py` | 新增 `_global_costmap_cb`、`_validate_goal_in_costmap`，`_goal_cb` 中插入验证，新增订阅和参数 |
+| `config/opentcs_vehicle.yaml` | 新增 3 个参数 |
+| `docs/param-tuning.md` | 本节 |

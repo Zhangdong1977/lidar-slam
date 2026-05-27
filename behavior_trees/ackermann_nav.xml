@@ -2,15 +2,17 @@
   Ackermann navigation behavior tree.
   Based on navigate_to_pose_w_replanning_and_recovery.xml.
   Spin recovery removed (Ackermann cannot rotate in place), replaced with Wait.
+  RateController 1.0 Hz (standard Nav2 value) to avoid empty-path timing issue.
+  Recovery condition check removed to ensure retries always run.
 -->
 <root BTCPP_format="4" main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+    <RecoveryNode number_of_retries="3" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
         <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
         <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
-        <RateController hz="0.1">
-          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="2" name="ComputePathToPose">
             <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
             <Sequence>
               <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
@@ -18,7 +20,7 @@
             </Sequence>
           </RecoveryNode>
         </RateController>
-        <RecoveryNode number_of_retries="1" name="FollowPath">
+        <RecoveryNode number_of_retries="2" name="FollowPath">
           <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
           <Sequence>
             <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
@@ -26,25 +28,18 @@
           </Sequence>
         </RecoveryNode>
       </PipelineSequence>
-      <Sequence>
-        <Fallback>
-          <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
-          <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
-          <AreErrorCodesPresent error_code="{compute_path_error_code}" error_codes_to_check="205;206"/>
-        </Fallback>
-        <ReactiveFallback name="RecoveryFallback">
-          <GoalUpdated/>
-          <RoundRobin name="RecoveryActions">
-            <BackUp backup_dist="3.5" backup_speed="0.35" error_code_id="{backup_code_id}"/>
-            <Sequence name="ClearingActions">
-              <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
-              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
-            </Sequence>
-            <Wait wait_duration="2"/>
-            <BackUp backup_dist="2.0" backup_speed="0.3" error_code_id="{backup_code_id}"/>
-          </RoundRobin>
-        </ReactiveFallback>
-      </Sequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <BackUp backup_dist="3.5" backup_speed="0.35" error_code_id="{backup_code_id}"/>
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <Wait wait_duration="2"/>
+          <BackUp backup_dist="2.0" backup_speed="0.3" error_code_id="{backup_code_id}"/>
+        </RoundRobin>
+      </ReactiveFallback>
     </RecoveryNode>
   </BehaviorTree>
 </root>
