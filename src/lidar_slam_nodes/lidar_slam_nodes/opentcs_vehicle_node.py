@@ -21,7 +21,7 @@ import uuid
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from nav2_msgs.action import NavigateToPose
 from sensor_msgs.msg import BatteryState, LaserScan
@@ -118,6 +118,19 @@ class OpentcsVehicleNode(Node):
         self.declare_parameter('goal_bounds_tolerance', 0.5)
         self.declare_parameter('goal_reject_unknown_cost', True)
 
+        # Ackermann heading alignment parameters
+        self.declare_parameter('goal_heading_alignment_enabled', True)
+        self.declare_parameter('goal_heading_alignment_tolerance', 0.15)
+        self.declare_parameter('alignment_forward_speed', 0.3)
+        self.declare_parameter('alignment_reverse_speed', 0.25)
+        self.declare_parameter('alignment_angular_gain', 2.0)
+        self.declare_parameter('alignment_max_omega', 0.8)
+        self.declare_parameter('alignment_forward_dist', 0.8)
+        self.declare_parameter('alignment_reverse_dist', 0.6)
+        self.declare_parameter('alignment_max_iterations', 5)
+        self.declare_parameter('alignment_stop_duration', 0.5)
+        self.declare_parameter('alignment_timeout', 30.0)
+
         # Load parameters
         self._vehicle_name = self.get_parameter('vehicle_name').value
         self._access_identity = self.get_parameter('access_identity').value
@@ -148,6 +161,17 @@ class OpentcsVehicleNode(Node):
         self._estimated_time_remaining = 0.0
         self._cancel_timeout_s = cancel_timeout_s
         self._goal_generation = 0
+        self._current_goal_yaw = 0.0
+
+        # Heading alignment state machine
+        self._alignment_active = False
+        self._alignment_phase = 'IDLE'
+        self._alignment_goal_yaw = 0.0
+        self._alignment_start_x = 0.0
+        self._alignment_start_y = 0.0
+        self._alignment_iteration = 0
+        self._alignment_stop_start = 0.0
+        self._alignment_start_time = 0.0
 
         # Pose from TF
         self._pose_x = 0.0
@@ -213,6 +237,7 @@ class OpentcsVehicleNode(Node):
         self._state_pub = self.create_publisher(String, state_topic, 10)
         self._battery_pub = self.create_publisher(
             BatteryState, battery_topic, 10)
+        self._cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         # --- Subscribers ---
         goal_topic = self.get_parameter('goal_pose_topic').value
@@ -274,6 +299,7 @@ class OpentcsVehicleNode(Node):
         self.create_timer(status_ms / 1000.0, self._publish_robot_state)
         self.create_timer(1.0, self._publish_battery)
         self.create_timer(0.5, self._check_localization)
+        self.create_timer(0.05, self._alignment_step)
 
         self.get_logger().info(
             f'opentcs_vehicle_node started: vehicle={self._vehicle_name}, '
@@ -408,6 +434,20 @@ class OpentcsVehicleNode(Node):
     # =========================================================================
 
     def _goal_cb(self, msg: PoseStamped):
+        # Cancel any active heading alignment
+        if self._alignment_active:
+            self.get_logger().info('Canceling alignment due to new goal')
+            self._alignment_active = False
+            self._alignment_phase = 'IDLE'
+            self._publish_cmd_vel(0.0, 0.0)
+
+        # Save goal yaw for post-navigation heading alignment
+        q = msg.pose.orientation
+        self._current_goal_yaw = math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        )
+
         self.get_logger().info(
             f'Goal received on {self.get_parameter("goal_pose_topic").value}: '
             f'({msg.pose.position.x:.2f}, {msg.pose.position.y:.2f}), '
@@ -510,26 +550,37 @@ class OpentcsVehicleNode(Node):
         status = result.status
         self.get_logger().info(f'Goal {self._current_goal_id} finished with status: {status}')
 
+        # Nav2 is done; clear handle and metrics regardless of outcome
+        self._goal_handle = None
+        self._distance_remaining = 0.0
+        self._estimated_time_remaining = 0.0
+
         if status == GOAL_STATUS_SUCCEEDED:
+            # Check if heading alignment is needed
+            if self._should_align_heading():
+                self._start_alignment()
+                return  # Will report success after alignment completes
             self._set_dispatch(DispatchStatus.SUCCEEDED)
             self._set_state(VehicleState.IDLE)
+            self._current_order_id = ''
+            self._current_goal_id = ''
         elif status == GOAL_STATUS_CANCELED:
             self._set_dispatch(DispatchStatus.CANCELED)
             self._set_state(VehicleState.IDLE)
+            self._current_order_id = ''
+            self._current_goal_id = ''
         elif status == GOAL_STATUS_ABORTED:
             self._set_dispatch(DispatchStatus.ABORTED)
             self._set_fault('NAV2_ABORTED', f'Nav2 aborted goal with status {status}')
             self._set_state(VehicleState.ERROR)
+            self._current_order_id = ''
+            self._current_goal_id = ''
         else:
             self._set_dispatch(DispatchStatus.ABORTED)
             self._set_fault('NAV2_UNKNOWN', f'Nav2 finished with unknown status {status}')
             self._set_state(VehicleState.ERROR)
-
-        self._goal_handle = None
-        self._distance_remaining = 0.0
-        self._estimated_time_remaining = 0.0
-        self._current_order_id = ''
-        self._current_goal_id = ''
+            self._current_order_id = ''
+            self._current_goal_id = ''
 
     def _cancel_goal_internal(self):
         if self._goal_handle is not None:
@@ -541,6 +592,139 @@ class OpentcsVehicleNode(Node):
 
     def cancel_current_goal(self):
         self._cancel_goal_internal()
+
+    # =========================================================================
+    # Ackermann heading alignment (multi-point turn)
+    # =========================================================================
+
+    @staticmethod
+    def _normalize_angle(angle):
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
+
+    def _should_align_heading(self):
+        if not self.get_parameter('goal_heading_alignment_enabled').value:
+            return False
+        heading_error = abs(self._normalize_angle(
+            self._current_goal_yaw - self._pose_yaw))
+        tolerance = self.get_parameter('goal_heading_alignment_tolerance').value
+        return heading_error > tolerance
+
+    def _start_alignment(self):
+        self._alignment_active = True
+        self._alignment_phase = 'FORWARD'
+        self._alignment_goal_yaw = self._current_goal_yaw
+        self._alignment_start_x = self._pose_x
+        self._alignment_start_y = self._pose_y
+        self._alignment_iteration = 0
+        self._alignment_start_time = time.monotonic()
+        self._set_dispatch(DispatchStatus.EXECUTING)
+        heading_err = self._normalize_angle(
+            self._alignment_goal_yaw - self._pose_yaw)
+        self.get_logger().info(
+            f'Starting heading alignment: current_yaw='
+            f'{math.degrees(self._pose_yaw):.1f}°, '
+            f'goal_yaw={math.degrees(self._alignment_goal_yaw):.1f}°, '
+            f'error={math.degrees(heading_err):.1f}°')
+
+    def _finish_alignment(self, success):
+        self._alignment_active = False
+        self._alignment_phase = 'IDLE'
+        self._publish_cmd_vel(0.0, 0.0)
+        heading_err = self._normalize_angle(
+            self._alignment_goal_yaw - self._pose_yaw)
+        if success:
+            self.get_logger().info(
+                f'Heading alignment succeeded: yaw='
+                f'{math.degrees(self._pose_yaw):.1f}°, '
+                f'remaining_error={math.degrees(heading_err):.1f}°, '
+                f'iterations={self._alignment_iteration}')
+        else:
+            self.get_logger().warn(
+                f'Heading alignment gave up: yaw='
+                f'{math.degrees(self._pose_yaw):.1f}°, '
+                f'remaining_error={math.degrees(heading_err):.1f}°, '
+                f'iterations={self._alignment_iteration}')
+        self._set_dispatch(DispatchStatus.SUCCEEDED)
+        self._set_state(VehicleState.IDLE)
+        self._current_order_id = ''
+        self._current_goal_id = ''
+
+    def _alignment_step(self):
+        if not self._alignment_active:
+            return
+
+        now = time.monotonic()
+        timeout = self.get_parameter('alignment_timeout').value
+        if now - self._alignment_start_time > timeout:
+            self._finish_alignment(False)
+            return
+
+        heading_error = self._normalize_angle(
+            self._alignment_goal_yaw - self._pose_yaw)
+        tolerance = self.get_parameter('goal_heading_alignment_tolerance').value
+
+        if abs(heading_error) < tolerance:
+            self._finish_alignment(True)
+            return
+
+        max_iter = self.get_parameter('alignment_max_iterations').value
+        if self._alignment_iteration >= max_iter:
+            self._finish_alignment(False)
+            return
+
+        # P-control for angular velocity
+        gain = self.get_parameter('alignment_angular_gain').value
+        max_omega = self.get_parameter('alignment_max_omega').value
+        omega = max(-max_omega, min(max_omega, gain * heading_error))
+
+        if self._alignment_phase == 'FORWARD':
+            dist = math.hypot(self._pose_x - self._alignment_start_x,
+                              self._pose_y - self._alignment_start_y)
+            fwd_dist = self.get_parameter('alignment_forward_dist').value
+            if dist >= fwd_dist:
+                self._publish_cmd_vel(0.0, 0.0)
+                self._alignment_phase = 'STOP1'
+                self._alignment_stop_start = now
+            else:
+                fwd_speed = self.get_parameter('alignment_forward_speed').value
+                self._publish_cmd_vel(fwd_speed, omega)
+
+        elif self._alignment_phase == 'STOP1':
+            stop_dur = self.get_parameter('alignment_stop_duration').value
+            if now - self._alignment_stop_start > stop_dur:
+                self._alignment_phase = 'REVERSE'
+                self._alignment_start_x = self._pose_x
+                self._alignment_start_y = self._pose_y
+
+        elif self._alignment_phase == 'REVERSE':
+            dist = math.hypot(self._pose_x - self._alignment_start_x,
+                              self._pose_y - self._alignment_start_y)
+            rev_dist = self.get_parameter('alignment_reverse_dist').value
+            if dist >= rev_dist:
+                self._publish_cmd_vel(0.0, 0.0)
+                self._alignment_phase = 'STOP2'
+                self._alignment_stop_start = now
+            else:
+                rev_speed = self.get_parameter('alignment_reverse_speed').value
+                self._publish_cmd_vel(-rev_speed, omega)
+
+        elif self._alignment_phase == 'STOP2':
+            stop_dur = self.get_parameter('alignment_stop_duration').value
+            if now - self._alignment_stop_start > stop_dur:
+                self._alignment_iteration += 1
+                self._alignment_phase = 'FORWARD'
+                self._alignment_start_x = self._pose_x
+                self._alignment_start_y = self._pose_y
+
+    def _publish_cmd_vel(self, linear_x, angular_z):
+        msg = Twist()
+        msg.linear.x = linear_x
+        msg.angular.z = angular_z
+        self._cmd_vel_pub.publish(msg)
 
     # =========================================================================
     # State management

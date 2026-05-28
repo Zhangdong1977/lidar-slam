@@ -1410,3 +1410,107 @@ Sidecar → /ackermann_robot/goal_pose → _goal_cb → _validate_goal_in_costma
 | `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py` | 新增 `_global_costmap_cb`、`_validate_goal_in_costmap`，`_goal_cb` 中插入验证，新增订阅和参数 |
 | `config/opentcs_vehicle.yaml` | 新增 3 个参数 |
 | `docs/param-tuning.md` | 本节 |
+
+---
+
+## 34. Ackermann 航向对齐：Reeds-Shepp 规划 + 多点转向 (2026/05/28)
+
+### 34.1 问题描述
+
+第 31 节的修复（放宽容差 + 禁用 rotate_to_heading）没有从根本上解决问题。机器人仍然围绕目标点绕圈，无法到达。根因分析：
+
+1. **Navfn 规划器忽略运动学约束**：生成的路径包含 Ackermann 车辆无法执行的急转弯，接近目标时控制器无法跟踪
+2. **RPP 控制器禁用倒车**：即使规划器生成了好的路径，控制器也无法跟随倒车段
+3. **无航向对齐机制**：Ackermann 车辆不能原地旋转，当到达 xy 容差但航向偏差大时，只能绕圈
+
+### 34.2 解决方案
+
+三层修复：
+
+**层1 — 规划器替换**：Navfn → SmacPlannerHybrid (REEDS_SHEPP)
+- Reeds-Shepp 曲线包含倒车段，能规划出以正确航向到达目标的运动学可行路径
+- 最小转弯半径 1.0m 匹配车辆参数（轴距 0.58m / tan(30°) ≈ 1.0m）
+- 倒车惩罚系数 2.0，优先走前进路径，仅在对齐航向需要时使用倒车
+
+**层2 — RPP 控制器调整**：
+- `allow_reversing: true` — 允许跟随倒车段
+- `yaw_goal_tolerance`: 0.50 → 0.80 rad — 让 Nav2 更容易判定"到达"
+- `lookahead_dist`: 0.8 → 0.6 — 缩短前瞻距离，减少接近目标时的超调
+
+**层3 — 航向对齐行为**（opentcs_vehicle_node.py 新增）：
+- Nav2 目标成功后，检查航向偏差是否超过阈值
+- 若超过，自动执行多点转向（前进-停车-倒车-停车 循环）
+- 利用 Ackermann 运动学：前进时打 A 方向方向盘→航向转 A；倒车时打 B 方向方向盘→航向继续转 A
+- P 控制器根据航向误差计算角速度，大误差时大转弯，小误差时微调
+
+### 34.3 参数变更
+
+**nav2_params_opentcs.yaml — 规划器**：
+
+| 参数 | 旧值 | 新值 |
+|------|------|------|
+| `planner plugin` | `nav2_navfn_planner::NavfnPlanner` | `nav2_smac_planner::SmacPlannerHybrid` |
+| `expected_planner_frequency` | 20.0 | 5.0 |
+| `motion_model_for_search` | — | `REEDS_SHEPP` |
+| `minimum_turning_radius` | — | 1.0 |
+| `goal_heading_mode` | — | `FORWARD` |
+| `reverse_penalty` | — | 2.0 |
+| `non_straight_penalty` | — | 1.2 |
+| `cost_penalty` | — | 10.0 |
+| `tolerance` | 0.5 | 0.5（不变） |
+
+**nav2_params_opentcs.yaml — RPP 控制器**：
+
+| 参数 | 旧值 | 新值 |
+|------|------|------|
+| `allow_reversing` | false | true |
+| `yaw_goal_tolerance` | 0.50 | 0.80 |
+| `lookahead_dist` | 0.8 | 0.6 |
+| `min_lookahead_dist` | 0.4 | 0.3 |
+| `max_lookahead_dist` | 1.2 | 1.0 |
+
+**opentcs_vehicle_node.py — 新增对齐参数**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `goal_heading_alignment_enabled` | true | 是否启用航向对齐 |
+| `goal_heading_alignment_tolerance` | 0.15 | 对齐精度 (~8.6°) |
+| `alignment_forward_speed` | 0.3 | 前进速度 (m/s) |
+| `alignment_reverse_speed` | 0.25 | 倒车速度 (m/s) |
+| `alignment_angular_gain` | 2.0 | 角速度 P 增益 |
+| `alignment_max_omega` | 0.8 | 最大角速度 (rad/s) |
+| `alignment_forward_dist` | 0.8 | 每次前进距离 (m) |
+| `alignment_reverse_dist` | 0.6 | 每次倒车距离 (m) |
+| `alignment_max_iterations` | 5 | 最大前进-倒车循环次数 |
+| `alignment_stop_duration` | 0.5 | 阶段间停车时间 (s) |
+| `alignment_timeout` | 30.0 | 总超时 (s) |
+
+### 34.4 对齐算法
+
+```
+状态机: FORWARD → STOP1 → REVERSE → STOP2 → FORWARD → ...
+
+每步：
+1. 计算航向误差 = normalize_angle(goal_yaw - current_yaw)
+2. 若 |误差| < 0.15 rad → 对齐成功，报告 SUCCEEDED
+3. 若迭代 >= 5 次或超时 → 放弃，报告 SUCCEEDED（尽力而为）
+4. P 控制器: omega = clamp(gain × 误差, -max_omega, max_omega)
+5. 前进阶段: cmd_vel = (forward_speed, omega)
+6. 倒车阶段: cmd_vel = (-reverse_speed, omega)
+   - cmd_vel_bridge 自动处理：倒车时反转方向盘方向
+   - 效果：前进和倒车阶段航向都朝目标方向变化
+```
+
+### 34.5 对齐期间的应急处理
+
+- 新目标到达 → 立即取消对齐，停车，处理新目标
+- 对齐超时 (30s) → 尽力而为报告 SUCCEEDED
+- 对齐命令发布到 /cmd_vel，经 velocity_smoother 和 collision_monitor 保障安全
+
+### 34.6 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `config/nav2_params_opentcs.yaml` | 规划器替换、RPP 参数调整、目标容差调整 |
+| `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py` | 添加航向对齐状态机、cmd_vel 发布器、12 个新参数 |
+| `docs/param-tuning.md` | 本节 |
