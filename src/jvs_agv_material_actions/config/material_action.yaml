@@ -1,0 +1,4 @@
+material_action_server:
+  ros__parameters:
+    vehicle_name: "ackermann_robot"
+    action_timeout_ms: 300000

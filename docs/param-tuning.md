@@ -1514,3 +1514,99 @@ Sidecar → /ackermann_robot/goal_pose → _goal_cb → _validate_goal_in_costma
 | `config/nav2_params_opentcs.yaml` | 规划器替换、RPP 参数调整、目标容差调整 |
 | `src/lidar_slam_nodes/lidar_slam_nodes/opentcs_vehicle_node.py` | 添加航向对齐状态机、cmd_vel 发布器、12 个新参数 |
 | `docs/param-tuning.md` | 本节 |
+
+---
+
+## 35. 操作执行方案升级 (v1.0 → v2.0)
+
+**日期**: 2026-05-29
+**场景**: sim_ackermann_rs485
+**文档**: `docs/ROS2-操作执行技术方案.md` v2.0
+
+### 35.1 变更摘要
+
+| 变更项 | v1.0 | v2.0 |
+|--------|------|------|
+| 通信模式 | ROS2 Topic (`std_msgs/String`) | ROS2 Action (LoadMaterials / UnloadMaterials) |
+| 消息格式 | JSON 字符串 | MaterialSpec / MaterialActual 强类型消息 |
+| 操作类型 | load / unload / charge | load / unload (物料操作) |
+| 反馈能力 | 无 | Action Feedback (阶段 + 进度) |
+| 取消能力 | 无 | Action Cancel 支持 |
+| 包结构 | 未定义 | jvs_material_actions + jvs_operation_handler |
+
+### 35.2 新增包
+
+| 包名 | 类型 | 说明 |
+|------|------|------|
+| `jvs_material_actions` | ament_cmake | Action 定义 (LoadMaterials.action, UnloadMaterials.action, MaterialSpec.msg, MaterialActual.msg) |
+| `jvs_operation_handler` | ament_python | 操作节点 (Action Server) + 硬件驱动层 (StubDriver / PlcDriver) |
+
+### 35.3 新增参数
+
+| 节点 | 参数 | 默认值 | 说明 |
+|------|------|--------|------|
+| operation_handler | `namespace` | `""` | ROS2 命名空间，对应车辆名 |
+| operation_handler | `driver_type` | `"stub"` | 驱动类型：stub(模拟) / plc(真实硬件) |
+| operation_handler | `operation_timeout` | `60.0` | 单次操作超时(秒) |
+
+### 35.4 Launch 集成
+
+- 在 `sim_ackermann_rs485.launch.py` 中 opentcs_vehicle_node (30s) 之后，32s 延迟启动 operation_handler_node
+- Action 名称：`/ackermann_robot/load_materials`、`/ackermann_robot/unload_materials`
+
+---
+
+## 36. 上下货 Action 仿真 GUI（JVS-VGA控制台）(2026-05-30)
+
+**日期**: 2026-05-30
+**场景**: sim_ackermann_rs485
+**文档**: `docs/ROS2端上下货动作实现方案-2026-05-29.md`
+
+### 36.1 概述
+
+新增 PyQt5 GUI 应用（JVS-VGA控制台），在 Gazebo 仿真环境中模拟装货/卸货 Action Server。操作员通过界面查看物料信息并勾选完成状态。
+
+### 36.2 新增包
+
+| 包名 | 类型 | 说明 |
+|------|------|------|
+| `jvs_agv_material_msgs` | ament_cmake | 接口定义：MaterialSpec.msg, MaterialActual.msg, LoadMaterials.action, UnloadMaterials.action |
+| `jvs_agv_material_actions` | ament_python | PyQt5 GUI + Action Server 节点 |
+
+### 36.3 新增参数
+
+**文件**: `config/material_action.yaml`
+
+| 节点 | 参数 | 默认值 | 说明 |
+|------|------|--------|------|
+| material_action_server | `vehicle_name` | `"ackermann_robot"` | 车辆名称，用于 goal 验证 |
+| material_action_server | `action_timeout_ms` | `300000` | Action 超时(毫秒) |
+
+### 36.4 Action 接口
+
+| Action | Goal 关键字段 | Result 关键字段 | Feedback |
+|--------|--------------|----------------|----------|
+| `load_materials` | job_id, vehicle_name, materials[] | success, status, actual_loaded[], current_load[] | phase, progress, message |
+| `unload_materials` | 同上 | actual_unloaded[] 替代 actual_loaded[] | 同上 |
+
+### 36.5 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/jvs_agv_material_msgs/` | 接口包（msg + action + CMakeLists） |
+| `src/jvs_agv_material_actions/` | GUI 包（Action Server + Qt 界面） |
+| `config/material_action.yaml` | GUI 节点参数 |
+
+### 36.6 Launch 集成
+
+| 文件 | 变更 |
+|------|------|
+| `launch/sim_ackermann_rs485.launch.py` | 添加 TimerAction(period=32.0) 启动 material_action_gui 节点 |
+
+### 36.7 GUI 操作说明
+
+- 窗口标题：JVS-VGA控制台
+- 物料表格每行有复选框，操作员勾选实际完成的物料
+- **提交**：全部勾选→SUCCEEDED，部分勾选→PARTIAL，全部未勾选→FAILED
+- **全部失败**：忽略勾选，直接返回 FAILED
+- **取消**：返回 CANCELLED

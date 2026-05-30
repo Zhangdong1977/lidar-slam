@@ -33,6 +33,7 @@ def generate_launch_description():
     ekf_config = os.path.join(project_dir, 'config', 'ekf.yaml')
     rs485_config = os.path.join(project_dir, 'config', 'rs485_bridge.yaml')
     opentcs_vehicle_config = os.path.join(project_dir, 'config', 'opentcs_vehicle.yaml')
+    material_action_config = os.path.join(project_dir, 'config', 'material_action.yaml')
 
     xacro_file = os.path.join(project_dir, 'models', 'ackermann', 'ackermann.xacro')
 
@@ -257,6 +258,18 @@ def generate_launch_description():
         arguments=['-d', rviz_config],
     )
 
+    # 17. Material action simulation GUI (JVS-VGA控制台)
+    material_action_gui = Node(
+        package='jvs_agv_material_actions',
+        executable='material_action_gui',
+        namespace=vehicle_namespace,
+        output='screen',
+        parameters=[material_action_config, {
+            'use_sim_time': True,
+            'vehicle_name': LaunchConfiguration('vehicle_name'),
+        }],
+    )
+
     return LaunchDescription([
         set_gz_resource_path,
         vehicle_name_arg,
@@ -285,5 +298,7 @@ def generate_launch_description():
         TimerAction(period=30.0, actions=[opentcs_vehicle]),
         # Route graph loader (after route_server is up)
         TimerAction(period=35.0, actions=[route_graph_loader]),
+        # Material action GUI (after Nav2 + opentcs_vehicle ready)
+        TimerAction(period=32.0, actions=[material_action_gui]),
         rviz2,
     ])

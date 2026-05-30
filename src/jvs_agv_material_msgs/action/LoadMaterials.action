@@ -1,0 +1,26 @@
+# Goal
+string job_id
+string request_id
+string order_id
+string order_no
+int32 step_no
+string vehicle_name
+string point_id
+string location_id
+MaterialSpec[] materials
+string trace_id
+string request_payload_json
+---
+# Result
+bool success
+string status
+string message
+string error_code
+MaterialActual[] actual_loaded
+MaterialActual[] current_load
+string result_payload_json
+---
+# Feedback
+string phase
+float32 progress
+string message
