@@ -1,4 +1,10 @@
-"""Main window: assembles all panels and connects signals."""
+"""Main window: left-right split layout with collapsible history.
+
+Layout:
+  Top:    Status bar (full width)
+  Left:   ActionPanel (fixed ~250px) — badge, summary, buttons
+  Right:  Material table (stretch) + collapsible history log
+"""
 
 from datetime import datetime
 
@@ -10,7 +16,7 @@ from .material_table import MaterialTable
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    """JVS-VGA控制台 main window."""
+    """JVS-VGA控制台 main window — left-right split layout."""
 
     def __init__(self, bridge, action_server, parent=None):
         """
@@ -22,40 +28,60 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bridge = bridge
         self._server = action_server
         self._active = False  # whether an action is currently in progress
+        self._history_count = 0
 
         self.setWindowTitle('JVS-VGA控制台')
-        self.setMinimumSize(700, 600)
+        self.setMinimumSize(900, 700)
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
-        layout = QtWidgets.QVBoxLayout(central)
-        layout.setSpacing(6)
+        root_layout = QtWidgets.QVBoxLayout(central)
+        root_layout.setSpacing(6)
+        root_layout.setContentsMargins(6, 6, 6, 6)
 
-        # Status bar
+        # ---- Top: Status bar (full width) ----
         self._status_bar = StatusBar()
-        layout.addWidget(self._status_bar)
+        root_layout.addWidget(self._status_bar)
 
-        # Action info + buttons
+        # ---- Middle: Left-right split ----
+        body_layout = QtWidgets.QHBoxLayout()
+        body_layout.setSpacing(6)
+
+        # Left panel: action summary + buttons (fixed width)
         self._action_panel = ActionPanel()
-        layout.addWidget(self._action_panel)
+        self._action_panel.setFixedWidth(250)
+        body_layout.addWidget(self._action_panel)
 
-        # Material table
-        mat_group = QtWidgets.QGroupBox('物料清单')
-        mat_layout = QtWidgets.QVBoxLayout()
-        mat_group.setLayout(mat_layout)
+        # Right area: material table + collapsible history
+        right_layout = QtWidgets.QVBoxLayout()
+        right_layout.setSpacing(6)
+
+        # Material table (stretches to fill available space)
         self._material_table = MaterialTable()
-        mat_layout.addWidget(self._material_table)
-        layout.addWidget(mat_group)
+        right_layout.addWidget(self._material_table, stretch=1)
 
-        # History log
-        history_group = QtWidgets.QGroupBox('操作历史')
-        history_layout = QtWidgets.QVBoxLayout()
-        history_group.setLayout(history_layout)
+        # Collapsible history log
+        self._history_toggle_btn = QtWidgets.QPushButton('▶ 操作历史')
+        self._history_toggle_btn.setCheckable(True)
+        self._history_toggle_btn.setChecked(False)
+        self._history_toggle_btn.setMinimumHeight(36)
+        self._history_toggle_btn.setStyleSheet(
+            'QPushButton { font-size: 16px; text-align: left; '
+            'padding: 4px 12px; background-color: #f5f5f5; '
+            'border: 1px solid #ddd; border-radius: 4px; }'
+            'QPushButton:checked { background-color: #e8e8e8; }')
+        self._history_toggle_btn.clicked.connect(self._toggle_history)
+        right_layout.addWidget(self._history_toggle_btn)
+
         self._history_log = QtWidgets.QTextEdit()
         self._history_log.setReadOnly(True)
-        self._history_log.setMaximumHeight(120)
-        history_layout.addWidget(self._history_log)
-        layout.addWidget(history_group)
+        self._history_log.setMaximumHeight(140)
+        self._history_log.setVisible(False)
+        right_layout.addWidget(self._history_log)
+
+        body_layout.addLayout(right_layout, stretch=1)
+
+        root_layout.addLayout(body_layout, stretch=1)
 
         # ---- Connect signals ----
         bridge.goal_received.connect(self._on_goal_received)
@@ -70,6 +96,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # Initial state
         self._status_bar.set_connected(True)
         self._log('系统就绪，等待 Action ...')
+
+    # ---- History toggle ----
+
+    def _toggle_history(self, checked):
+        """Toggle history log visibility."""
+        if checked:
+            self._history_toggle_btn.setText('▼ 操作历史')
+            self._history_log.setVisible(True)
+        else:
+            self._history_toggle_btn.setText('▶ 操作历史 (%d)' % self._history_count)
+            self._history_log.setVisible(False)
 
     # ---- Slots for bridge signals (called from Qt main thread) ----
 
@@ -148,3 +185,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Auto-scroll to bottom
         sb = self._history_log.verticalScrollBar()
         sb.setValue(sb.maximum())
+        # Update toggle button text when collapsed
+        self._history_count += 1
+        if not self._history_toggle_btn.isChecked():
+            self._history_toggle_btn.setText(
+                '▶ 操作历史 (%d)' % self._history_count)

@@ -2,6 +2,9 @@
 
 from PyQt5 import QtCore, QtWidgets
 
+from .checkbox_delegate import CheckBoxDelegate
+from .styles import TOUCH_ROW_HEIGHT
+
 
 class MaterialTable(QtWidgets.QWidget):
     """Table showing material list with checkboxes.
@@ -25,12 +28,12 @@ class MaterialTable(QtWidgets.QWidget):
         # Toolbar: select all / deselect all
         toolbar = QtWidgets.QHBoxLayout()
         self._select_all_btn = QtWidgets.QPushButton('全选')
-        self._select_all_btn.setFixedWidth(60)
+        self._select_all_btn.setMinimumWidth(100)
         self._select_all_btn.clicked.connect(self.select_all)
         toolbar.addWidget(self._select_all_btn)
 
         self._deselect_all_btn = QtWidgets.QPushButton('全不选')
-        self._deselect_all_btn.setFixedWidth(60)
+        self._deselect_all_btn.setMinimumWidth(100)
         self._deselect_all_btn.clicked.connect(self.deselect_all)
         toolbar.addWidget(self._deselect_all_btn)
 
@@ -46,6 +49,14 @@ class MaterialTable(QtWidgets.QWidget):
         self._table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self._table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
+
+        # Touch-friendly checkbox delegate for column 0
+        self._check_delegate = CheckBoxDelegate(self._table)
+        self._table.setItemDelegateForColumn(0, self._check_delegate)
+
+        # Checkbox column fixed width
+        self._table.setColumnWidth(0, 60)
+
         layout.addWidget(self._table)
 
         self._materials = []  # original list of material dicts
@@ -84,7 +95,12 @@ class MaterialTable(QtWidgets.QWidget):
                                 QtWidgets.QTableWidgetItem(
                                     mat.get('container_code', '')))
 
+            # Touch-friendly row height
+            self._table.setRowHeight(row, TOUCH_ROW_HEIGHT)
+
         self._table.resizeColumnsToContents()
+        # Restore checkbox column width after resizeColumnsToContents
+        self._table.setColumnWidth(0, 60)
 
     def get_checked_materials(self) -> list:
         """Return list of (checked: bool, material_dict)."""

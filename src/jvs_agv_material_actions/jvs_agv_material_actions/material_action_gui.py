@@ -17,6 +17,7 @@ from PyQt5 import QtWidgets
 
 from .material_action_server import MaterialActionServer
 from .gui.main_window import MainWindow
+from .gui.styles import GLOBAL_STYLESHEET
 
 
 def main(args=None):
@@ -46,6 +47,7 @@ def main(args=None):
     # 4. Create Qt application
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName('JVS-VGA控制台')
+    app.setStyleSheet(GLOBAL_STYLESHEET)
 
     # 5. Create main window, pass bridge + server
     window = MainWindow(node.bridge, node)
