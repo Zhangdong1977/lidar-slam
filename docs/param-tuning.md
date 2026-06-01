@@ -1677,3 +1677,178 @@ Sidecar → /ackermann_robot/goal_pose → _goal_cb → _validate_goal_in_costma
 | 左侧面板 | 250px | 全高 | 28% |
 | 右侧物料表格 | ~650px | ~560px | **57%**（原 15%） |
 | 右侧操作历史 | ~650px | ~140px（可折叠） | 15% |
+
+## 37. Lifecycle 管理与保活机制重构 (2026/05/31)
+
+### 37.1 问题
+
+1. `use_respawn='False'`：所有节点崩溃后无法恢复
+2. 自定义节点（cmd_vel_bridge, rs485_bridge, rs485_receiver, opentcs_vehicle_node, vehicle_controller, route_graph_loader）是 plain Node，无有序状态管理
+3. TimerAction 固定延时启动，在慢机器上不够、快机器上浪费
+4. 无保活/看门狗机制
+5. 无 sim/real 参数化支持
+
+### 37.2 解决方案
+
+**LifecycleNode 转换**：6 个自定义节点全部转为 LifecycleNode
+
+| 节点 | 语言 | 变更 |
+|------|------|------|
+| cmd_vel_bridge | Python | Node → rclpy_lifecycle.LifecycleNode |
+| rs485_chassis_bridge | Python | Node → rclpy_lifecycle.LifecycleNode |
+| rs485_chassis_receiver | Python | Node → rclpy_lifecycle.LifecycleNode |
+| opentcs_vehicle_node | Python | Node → rclpy_lifecycle.LifecycleNode |
+| route_graph_loader | Python | Node → rclpy_lifecycle.LifecycleNode |
+| vehicle_controller | C++ | rclcpp::Node → rclcpp_lifecycle::LifecycleNode |
+
+**三级 lifecycle_manager 架构**：
+
+| Manager | 管理节点 |
+|---------|---------|
+| lifecycle_manager_localization | map_server, amcl |
+| lifecycle_manager_navigation | controller_server, smoother_server, planner_server, route_server, behavior_server, velocity_smoother, collision_monitor, bt_navigator, waypoint_follower, docking_server |
+| lifecycle_manager_custom (新增) | cmd_vel_bridge, rs485_chassis_bridge, rs485_chassis_receiver, opentcs_vehicle_node, route_graph_loader, vehicle_controller |
+
+### 37.3 参数变更
+
+| 参数 | 旧值 | 新值 | 位置 | 原因 |
+|------|------|------|------|------|
+| `use_respawn` | `'False'` | `'True'` | launch file → localization/navigation custom | 启用崩溃自动恢复 |
+| `respawn` | 无 | `True` | 所有自定义 LifecycleNode | 启用崩溃自动恢复 |
+| `respawn_delay` | 无 | `2.0` | 所有自定义 LifecycleNode | 防止快速重启循环 |
+| `lifecycle_manager_custom` | 不存在 | 新增 | nav2_params_opentcs.yaml | 管理自定义 LifecycleNode |
+| `service_call_timeout` | `60000.0` | **已移除** | 全部 lifecycle_manager | Nav2 Jazzy 的 lifecycle_manager 不读取此参数，属于无效配置 |
+| `bond_timeout` | — | `10.0` | lifecycle_manager_custom | 心跳超时检测 |
+| `attempt_respawn_reconnection` | — | `true` | lifecycle_manager_custom | respawn 后自动重连 |
+
+### 37.4 新增文件
+
+| 文件 | 用途 |
+|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/wait_for_topic.py` | Topic 就绪检测 readiness guard |
+| `src/lidar_slam_nodes/lidar_slam_nodes/wait_for_service.py` | Service 就绪检测 readiness guard |
+| `src/lidar_slam_nodes/lidar_slam_nodes/node_watchdog.py` | 运行时健康监控（发布 /system_health） |
+| `config/watchdog.yaml` | Watchdog 监控配置 |
+| `scripts/launch/real_ackermann_nav.sh` | 真实小车启动脚本 |
+
+### 37.5 事件驱动启动序列（替换 TimerAction）
+
+```
+T=0     socat + gz_sim + bridge + robot_state_publisher + laser_tf + rviz2 + watchdog
+  ↓ wait_for_topic(/scan)
+spawn_robot + ekf
+  ↓ wait_for_service(controller_manager)
+load_controllers
+  ↓ wait_for_topic(/joint_states)
+rs485_receiver + vehicle_controller → 1s → rs485_bridge
+  ↓ wait_for_tf(odom→body_link)
+localization (AMCL + map_server)
+  ↓ wait_for_topic(/amcl_pose)
+navigation + lifecycle_manager_custom + cmd_vel_bridge + opentcs_vehicle
+  ↓ wait_for_service(route_server/set_route_graph)
+route_graph_loader
+  5s → material_action_gui
+```
+
+### 37.6 Sim/Real 参数化
+
+Launch argument `simulation:=True/False` 控制节点启停：
+
+| 节点 | simulation=True | simulation=False |
+|------|----------------|-----------------|
+| socat, gz_sim, bridge | ✅ | ❌ |
+| spawn_robot, load_controllers | ✅ | ❌ |
+| rs485_receiver, vehicle_controller | ✅ | ❌ |
+| rs485_bridge | ✅ (虚拟串口) | ✅ (物理串口) |
+| cmd_vel_bridge, Nav2, opentcs_vehicle | ✅ | ✅ |
+| use_sim_time | True | False |
+
+---
+
+## 38. 自定义 lifecycle_starter 替代 Nav2 lifecycle_manager（2026-05-31）
+
+### 38.1 根因
+
+`sim_ackermann_rs485.sh` 启动后，`lifecycle_manager_localization` 日志打印 `"Configuring map_server"` 后卡住不动（最长 286 秒），后续 AMCL 永远不会被 activate。
+
+**根因**：Nav2 lifecycle_manager 的 `service_client.hpp` 使用无超时的 `spin_until_future_complete()`（第 98-127 行），在 Fast-DDS + Gazebo 高 CPU 负载下，DDS 服务请求可能卡在传输层数分钟。Nav2 lifecycle_manager 没有重试逻辑，`changeStateForNode()` 失败后直接 abort。
+
+### 38.2 解决方案
+
+创建自定义 `lifecycle_starter.py` 节点，提供**可控超时 + 自动重试 + 健康监控**的 lifecycle 状态转换，替代 Nav2 lifecycle_manager 管理 map_server、amcl 和所有自定义 Python LifecycleNode。
+
+### 38.3 架构变更
+
+```
+之前（不稳定）：
+  lifecycle_manager_localization  → map_server, amcl（Nav2 内置，无超时无重试）
+  lifecycle_manager_custom        → cmd_vel_bridge, rs485_bridge, ...（Nav2 内置，无超时无重试）
+  lifecycle_manager_navigation    → 10 个 Nav2 C++ 节点（保留）
+
+之后（稳定）：
+  lifecycle_starter_localization  → map_server, amcl（自定义，30s 超时 + 5 次重试 + 指数退避）
+  lifecycle_starter_custom        → cmd_vel_bridge, rs485_bridge, ...（自定义，同上）
+  lifecycle_manager_navigation    → 10 个 Nav2 C++ 节点（保留 Nav2 内置，C++ 支持 bond）
+```
+
+### 38.4 事件链变更
+
+```
+之前：
+  wait_ekf_tf → localization_custom.launch.py (内含 lifecycle_manager_localization)
+  wait_amcl (/amcl_pose) → navigation + lifecycle_manager_custom + ...
+
+之后：
+  wait_ekf_tf → map_server + amcl + lifecycle_starter_localization
+                lifecycle_starter 执行: configure(map_server) → activate → configure(amcl) → activate
+                成功后发布 /lifecycle_starter_localization/ready
+  wait_for_topic(/lifecycle_starter_localization/ready) → navigation + lifecycle_starter_custom + ...
+```
+
+关键区别：不再依赖 `/amcl_pose`（需要 AMCL 定位收敛才有数据），而是依赖 lifecycle_starter 的 `ready` 信号（所有节点 active 后立即发布）。
+
+### 38.5 新增节点参数
+
+**lifecycle_starter_localization**（one-shot 模式，完成后退出）：
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `node_names` | `['map_server', 'amcl']` | 管理的 lifecycle 节点 |
+| `configure_timeout` | 30.0 | 单次 configure 服务调用超时 (s) |
+| `activate_timeout` | 30.0 | 单次 activate 服务调用超时 (s) |
+| `max_retries` | 5 | 每个状态转换最大重试次数 |
+| `retry_delay` | 2.0 | 重试间隔 (s)，实际使用指数退避 |
+| `startup_delay` | 2.0 | 启动前等待 DDS 稳定 (s) |
+| `monitor_period` | 0.0 | **禁用**（避免嵌套 spin_once 导致崩溃） |
+| `starter_name` | `'localization'` | 标识符 |
+
+**lifecycle_starter_custom**（one-shot + 两 pass 模式）：
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `node_names` | `['cmd_vel_bridge', 'rs485_chassis_bridge', 'rs485_chassis_receiver', 'opentcs_vehicle_node', 'route_graph_loader', 'vehicle_controller']` | 6 个自定义 LifecycleNode |
+| `startup_delay` | 5.0 | 等待 RS485 链路节点先启动 |
+| `monitor_period` | 0.0 | **禁用** |
+| 其余参数 | 同 localization | — |
+| `starter_name` | `'custom'` | 标识符 |
+
+### 38.6 修改文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `src/lidar_slam_nodes/lidar_slam_nodes/lifecycle_starter.py` | 已存在 | 自定义 lifecycle starter 节点（之前创建） |
+| `src/lidar_slam_nodes/setup.py` | 已有 | 已包含 lifecycle_starter entry_point |
+| `launch/sim_ackermann_rs485.launch.py` | 修改 | 替代 localization_custom include + lifecycle_manager_custom |
+| `config/nav2_params_opentcs.yaml` | 修改 | lifecycle_manager_localization/custom 段添加注释标记已弃用 |
+
+### 38.7 lifecycle_starter 行为特性
+
+1. **超时控制**：每个服务调用有独立超时，不会无限阻塞
+2. **自动重试**：失败后重试最多 max_retries 次，重试间隔使用指数退避（2s → 4s → 8s → 16s → 32s）
+3. **DDS 稳定等待**：startup_delay 让 DDS 服务发现在高负载下有足够时间完成
+4. **两 pass 启动**（custom starter）：首次 pass 跳过不可用节点继续处理后续节点，5s 后重试失败节点，共 3 轮
+5. **ready 信号**：发布 `/lifecycle_starter_{name}/ready` (Bool)，下游节点可精确等待
+6. **one-shot 模式**：startup 完成后进程退出（monitor_period=0），避免嵌套 spin_once 与 rclpy.spin() 冲突
+7. **变量命名**：`_managed_clients` 避免与 rclpy Node 内部 `_clients` (list) 冲突
+8. **参数类型**：`node_names` 默认值 `['']`（非 `[]`），确保 ROS2 识别为 STRING_ARRAY 而非 BYTE_ARRAY
+

@@ -1,0 +1,36 @@
+# Watchdog monitoring configuration for sim_ackermann_rs485 scenario.
+# Monitors critical nodes/topics and publishes /system_health diagnostics.
+
+node_watchdog:
+  ros__parameters:
+    check_period: 5.0
+    topic_timeout: 5.0
+
+    # Nodes whose absence is CRITICAL (triggers ERROR)
+    critical_nodes:
+      - ekf_filter_node
+      - amcl
+      - controller_server
+      - bt_navigator
+      - cmd_vel_bridge
+      - opentcs_vehicle_node
+      - lifecycle_manager_localization
+      - lifecycle_manager_navigation
+      - lifecycle_manager_custom
+
+    # Nodes whose absence is non-critical (triggers WARN)
+    non_critical_nodes:
+      - rviz2
+      - material_action_gui
+
+    # Topics whose staleness is CRITICAL (triggers ERROR)
+    critical_topics:
+      - /scan
+      - /odom
+      - /tf
+      - /cmd_vel
+      - /amcl_pose
+
+    # Topics whose staleness is non-critical (triggers WARN)
+    non_critical_topics:
+      - /route_graph/markers

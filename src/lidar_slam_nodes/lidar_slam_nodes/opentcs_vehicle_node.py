@@ -7,8 +7,8 @@ Sidecar subscribes to these ROS2 topics and exposes HTTP REST API to openTCS/JVS
 Data flow:
   Sidecar --/goal_pose--> this node --NavigateToPose--> Nav2
   Nav2 TF ----> this node --/amcl_pose----> Sidecar (10Hz)
-                        \\--/robot_state--> Sidecar (1Hz, JSON with 29+ fields)
-                        \\--/battery_state-> Sidecar (1Hz, simulated)
+                        \--/robot_state--> Sidecar (1Hz, JSON with 29+ fields)
+                        \--/battery_state-> Sidecar (1Hz, simulated)
 """
 
 import json
@@ -20,7 +20,7 @@ import uuid
 
 import rclpy
 from rclpy.action import ActionClient
-from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from nav2_msgs.action import NavigateToPose
@@ -74,10 +74,11 @@ GOAL_STATUS_CANCELED = 5
 GOAL_STATUS_ABORTED = 6
 
 
-class OpentcsVehicleNode(Node):
+class OpentcsVehicleNode(LifecycleNode):
     def __init__(self):
         super().__init__('opentcs_vehicle_node')
 
+    def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         # --- Declare parameters ---
         self.declare_parameter('vehicle_name', 'ackermann_robot')
         vehicle_name = self.get_parameter('vehicle_name').value
@@ -223,6 +224,23 @@ class OpentcsVehicleNode(Node):
         self._map_checksum = self._compute_map_checksum(
             self.get_parameter('map_yaml_file').value)
 
+        # Store rate params for on_activate
+        self._pose_rate = pose_rate
+        self._status_ms = status_ms
+
+        # Timer handles (for cleanup in on_deactivate)
+        self._timers = []
+
+        self.get_logger().info(
+            f'opentcs_vehicle_node configured: vehicle={self._vehicle_name}, '
+            f'base_frame={self._base_frame}, map_frame={self._map_frame}, '
+            f'pose_rate={pose_rate}Hz, state_rate={1000/status_ms:.1f}Hz, '
+            f'battery_sim={battery_sim}'
+        )
+
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         # TF
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -295,18 +313,29 @@ class OpentcsVehicleNode(Node):
         self._action_client = ActionClient(self, NavigateToPose, action_name)
 
         # --- Timers ---
-        self.create_timer(1.0 / pose_rate, self._publish_pose)
-        self.create_timer(status_ms / 1000.0, self._publish_robot_state)
-        self.create_timer(1.0, self._publish_battery)
-        self.create_timer(0.5, self._check_localization)
-        self.create_timer(0.05, self._alignment_step)
+        self._timers = [
+            self.create_timer(1.0 / self._pose_rate, self._publish_pose),
+            self.create_timer(self._status_ms / 1000.0, self._publish_robot_state),
+            self.create_timer(1.0, self._publish_battery),
+            self.create_timer(0.5, self._check_localization),
+            self.create_timer(0.05, self._alignment_step),
+        ]
 
-        self.get_logger().info(
-            f'opentcs_vehicle_node started: vehicle={self._vehicle_name}, '
-            f'base_frame={self._base_frame}, map_frame={self._map_frame}, '
-            f'pose_rate={pose_rate}Hz, state_rate={1000/status_ms:.1f}Hz, '
-            f'battery_sim={battery_sim}'
-        )
+        return super().on_activate(state)
+
+    def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
+        # Destroy all timers
+        for timer in self._timers:
+            self.destroy_timer(timer)
+        self._timers = []
+
+        return super().on_deactivate(state)
+
+    def on_cleanup(self, state: LifecycleState) -> TransitionCallbackReturn:
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_shutdown(self, state: LifecycleState) -> TransitionCallbackReturn:
+        return TransitionCallbackReturn.SUCCESS
 
     # =========================================================================
     # Subscriptions

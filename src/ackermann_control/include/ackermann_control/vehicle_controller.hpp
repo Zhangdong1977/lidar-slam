@@ -6,21 +6,34 @@
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_lifecycle/lifecycle_node.hpp"
+#include "rclcpp_lifecycle/lifecycle_publisher.hpp"
+#include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
 #include "std_msgs/msg/float64.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
 namespace ackermann_control
 {
 
-class VehicleController : public rclcpp::Node
+class VehicleController : public rclcpp_lifecycle::LifecycleNode
 {
 public:
+  using CallbackReturn =
+    rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
+
   explicit VehicleController(
     const double timer_period = 0.01,
     const double timeout_duration = 8e8  // 800ms in nanoseconds
   );
 
 private:
+  CallbackReturn on_configure(const rclcpp_lifecycle::State & state);
+  CallbackReturn on_activate(const rclcpp_lifecycle::State & state);
+  CallbackReturn on_deactivate(const rclcpp_lifecycle::State & state);
+  CallbackReturn on_cleanup(const rclcpp_lifecycle::State & state);
+  CallbackReturn on_shutdown(const rclcpp_lifecycle::State & state);
+
+
   std::pair<double, double> ackermann_steering_angle();
   std::pair<double, double> rear_differential_velocity();
 
@@ -29,6 +42,7 @@ private:
   void velocity_callback(const std_msgs::msg::Float64::SharedPtr msg);
 
   double timeout_duration_;
+  double timer_period_;
   rclcpp::Time last_velocity_time_;
   rclcpp::Time last_steering_time_;
 
@@ -55,8 +69,8 @@ private:
 
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr steering_angle_subscriber_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr velocity_subscriber_;
-  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr position_publisher_;
-  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr velocity_publisher_;
+  rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64MultiArray>::SharedPtr position_publisher_;
+  rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Float64MultiArray>::SharedPtr velocity_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

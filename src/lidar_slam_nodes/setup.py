@@ -33,6 +33,10 @@ setup(
             'rs485_chassis_receiver = lidar_slam_nodes.rs485_chassis_receiver:main',
             'opentcs_vehicle_node = lidar_slam_nodes.opentcs_vehicle_node:main',
             'route_graph_loader = lidar_slam_nodes.route_graph_loader:main',
+            'wait_for_topic = lidar_slam_nodes.wait_for_topic:main',
+            'wait_for_service = lidar_slam_nodes.wait_for_service:main',
+            'node_watchdog = lidar_slam_nodes.node_watchdog:main',
+            'lifecycle_starter = lidar_slam_nodes.lifecycle_starter:main',
         ],
     },
 )

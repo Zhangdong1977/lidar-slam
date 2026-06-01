@@ -55,6 +55,12 @@ pkill -f "lifecycle_manager" 2>/dev/null || true
 pkill -f "waypoint_follower" 2>/dev/null || true
 pkill -f "nav2_costmap" 2>/dev/null || true
 pkill -f "recoveries_server" 2>/dev/null || true
+pkill -f "nav2_smoother" 2>/dev/null || true
+pkill -f "velocity_smoother" 2>/dev/null || true
+pkill -f "collision_monitor" 2>/dev/null || true
+pkill -f "route_server" 2>/dev/null || true
+pkill -f "nav2_route" 2>/dev/null || true
+pkill -f "opennav_docking" 2>/dev/null || true
 
 # socat (virtual serial port pair for RS-485 bridge)
 pkill -f "socat.*chassis" 2>/dev/null || true
@@ -109,6 +115,12 @@ pkill -9 -f "lifecycle_manager" 2>/dev/null || true
 pkill -9 -f "waypoint_follower" 2>/dev/null || true
 pkill -9 -f "nav2_costmap" 2>/dev/null || true
 pkill -9 -f "recoveries_server" 2>/dev/null || true
+pkill -9 -f "nav2_smoother" 2>/dev/null || true
+pkill -9 -f "velocity_smoother" 2>/dev/null || true
+pkill -9 -f "collision_monitor" 2>/dev/null || true
+pkill -9 -f "route_server" 2>/dev/null || true
+pkill -9 -f "nav2_route" 2>/dev/null || true
+pkill -9 -f "opennav_docking" 2>/dev/null || true
 pkill -9 -f "socat.*chassis" 2>/dev/null || true
 pkill -9 -f "gzserver" 2>/dev/null || true
 pkill -9 -f "gzclient" 2>/dev/null || true

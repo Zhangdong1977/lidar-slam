@@ -10,15 +10,16 @@ Conversion: velocity = twist.linear.x
 
 import math
 import rclpy
-from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64
 
 
-class CmdVelBridge(Node):
+class CmdVelBridge(LifecycleNode):
     def __init__(self):
         super().__init__('cmd_vel_bridge')
 
+    def on_configure(self, state: LifecycleState):
         self.declare_parameter('wheel_base', 0.58)
         self.declare_parameter('max_steering_angle', 0.5236)
         self.declare_parameter('max_velocity', 1.4)
@@ -28,7 +29,7 @@ class CmdVelBridge(Node):
         self.wheel_base = self.get_parameter('wheel_base').value
         self.max_steering_angle = self.get_parameter('max_steering_angle').value
         self.max_velocity = self.get_parameter('max_velocity').value
-        publish_rate = self.get_parameter('publish_rate').value
+        self.publish_rate = self.get_parameter('publish_rate').value
         self.cmd_vel_timeout = self.get_parameter('cmd_vel_timeout').value
 
         self.latest_twist = None
@@ -37,15 +38,28 @@ class CmdVelBridge(Node):
         self.steering_pub = self.create_publisher(Float64, '/steering_angle', 10)
         self.velocity_pub = self.create_publisher(Float64, '/velocity', 10)
 
-        self.create_subscription(Twist, '/cmd_vel', self.twist_callback, 10)
-
-        period = 1.0 / publish_rate
-        self.create_timer(period, self.timer_callback)
-
         self.get_logger().info(
-            f'cmd_vel_bridge started: wheel_base={self.wheel_base}, '
+            f'cmd_vel_bridge configured: wheel_base={self.wheel_base}, '
             f'max_steer={self.max_steering_angle:.4f}, max_vel={self.max_velocity}'
         )
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_activate(self, state: LifecycleState):
+        self.create_subscription(Twist, '/cmd_vel', self.twist_callback, 10)
+        period = 1.0 / self.publish_rate
+        self._timer = self.create_timer(period, self.timer_callback)
+        return super().on_activate(state)
+
+    def on_deactivate(self, state: LifecycleState):
+        self.destroy_timer(self._timer)
+        self._timer = None
+        return super().on_deactivate(state)
+
+    def on_cleanup(self, state: LifecycleState):
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_shutdown(self, state: LifecycleState):
+        return TransitionCallbackReturn.SUCCESS
 
     def clamp(self, value, lo, hi):
         return max(lo, min(hi, value))

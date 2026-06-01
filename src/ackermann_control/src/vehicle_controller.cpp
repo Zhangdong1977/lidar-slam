@@ -7,11 +7,14 @@
 namespace ackermann_control
 {
 
+using CallbackReturn = VehicleController::CallbackReturn;
+
 VehicleController::VehicleController(
   const double timer_period,
   const double timeout_duration)
-: Node{"vehicle_controller"},
+: LifecycleNode{"vehicle_controller"},
   timeout_duration_{timeout_duration},
+  timer_period_{timer_period},
   last_velocity_time_{get_clock()->now()},
   last_steering_time_{get_clock()->now()},
   body_width_{0.0},
@@ -26,6 +29,10 @@ VehicleController::VehicleController(
   velocity_{0.0},
   wheel_angular_velocity_{0.0, 0.0},
   wheel_steering_angle_{0.0, 0.0}
+{
+}
+
+CallbackReturn VehicleController::on_configure(const rclcpp_lifecycle::State & /*state*/)
 {
   declare_parameter<double>("body_width", 0.0);
   declare_parameter<double>("body_length", 0.0);
@@ -48,6 +55,12 @@ VehicleController::VehicleController(
   get_parameter("transition_duration", transition_duration_);
   direction_change_time_ = get_clock()->now();
 
+  RCLCPP_INFO(get_logger(), "VehicleController configured");
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn VehicleController::on_activate(const rclcpp_lifecycle::State & /*state*/)
+{
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
     "/steering_angle", 10,
     std::bind(&VehicleController::steering_angle_callback, this, std::placeholders::_1));
@@ -63,8 +76,38 @@ VehicleController::VehicleController(
     "/forward_velocity_controller/commands", 10);
 
   timer_ = create_wall_timer(
-    std::chrono::duration<double>(timer_period),
+    std::chrono::duration<double>(timer_period_),
     std::bind(&VehicleController::timer_callback, this));
+
+  // Activate publishers
+  position_publisher_->on_activate();
+  velocity_publisher_->on_activate();
+
+  RCLCPP_INFO(get_logger(), "VehicleController activated");
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn VehicleController::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
+{
+  timer_ = nullptr;
+
+  position_publisher_->on_deactivate();
+  velocity_publisher_->on_deactivate();
+
+  RCLCPP_INFO(get_logger(), "VehicleController deactivated");
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn VehicleController::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
+{
+  RCLCPP_INFO(get_logger(), "VehicleController cleanup");
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn VehicleController::on_shutdown(const rclcpp_lifecycle::State & /*state*/)
+{
+  RCLCPP_INFO(get_logger(), "VehicleController shutdown");
+  return CallbackReturn::SUCCESS;
 }
 
 std::pair<double, double> VehicleController::ackermann_steering_angle()
@@ -140,13 +183,15 @@ void VehicleController::timer_callback()
     wheel_steering_angle_ = {0.0, 0.0};
   }
 
-  std_msgs::msg::Float64MultiArray position_msg;
-  position_msg.data = wheel_steering_angle_;
-  position_publisher_->publish(position_msg);
+  if (position_publisher_->is_activated() && velocity_publisher_->is_activated()) {
+    std_msgs::msg::Float64MultiArray position_msg;
+    position_msg.data = wheel_steering_angle_;
+    position_publisher_->publish(position_msg);
 
-  std_msgs::msg::Float64MultiArray velocity_msg;
-  velocity_msg.data = wheel_angular_velocity_;
-  velocity_publisher_->publish(velocity_msg);
+    std_msgs::msg::Float64MultiArray velocity_msg;
+    velocity_msg.data = wheel_angular_velocity_;
+    velocity_publisher_->publish(velocity_msg);
+  }
 }
 
 void VehicleController::steering_angle_callback(
@@ -217,7 +262,8 @@ void VehicleController::velocity_callback(
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<ackermann_control::VehicleController>());
+  auto node = std::make_shared<ackermann_control::VehicleController>();
+  rclcpp::spin(node->get_node_base_interface());
   rclcpp::shutdown();
   return 0;
 }

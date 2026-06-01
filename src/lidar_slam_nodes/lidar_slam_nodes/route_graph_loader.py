@@ -11,7 +11,7 @@ import os
 import tempfile
 
 import rclpy
-from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import Point as GeoPoint
 from nav2_msgs.srv import SetRouteGraph
@@ -19,11 +19,12 @@ from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 
 
-class RouteGraphLoader(Node):
+class RouteGraphLoader(LifecycleNode):
 
     def __init__(self):
         super().__init__('route_graph_loader')
 
+    def on_configure(self, state: LifecycleState):
         self.declare_parameter('graph_save_path', '/tmp/route_graph.geojson')
         self.declare_parameter('set_graph_service', 'route_server/set_route_graph')
         self.declare_parameter('service_timeout', 30.0)
@@ -34,6 +35,13 @@ class RouteGraphLoader(Node):
         self._pending_geojson = None
         self._loading = False
 
+        self._cli = self.create_client(SetRouteGraph, self._svc_name)
+
+        self.get_logger().info(
+            f'Route graph loader configured: service={self._svc_name}')
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_activate(self, state: LifecycleState):
         qos = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -41,8 +49,6 @@ class RouteGraphLoader(Node):
         )
         self._sub = self.create_subscription(
             String, '/route_graph', self._on_graph, qos)
-
-        self._cli = self.create_client(SetRouteGraph, self._svc_name)
 
         marker_qos = QoSProfile(
             depth=10,
@@ -56,6 +62,19 @@ class RouteGraphLoader(Node):
 
         self.get_logger().info(
             f'Ready: waiting for /route_graph, service={self._svc_name}')
+        return super().on_activate(state)
+
+    def on_deactivate(self, state: LifecycleState):
+        if self._timer is not None:
+            self.destroy_timer(self._timer)
+            self._timer = None
+        return super().on_deactivate(state)
+
+    def on_cleanup(self, state: LifecycleState):
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_shutdown(self, state: LifecycleState):
+        return TransitionCallbackReturn.SUCCESS
 
     def _wait_service(self):
         if self._pending_geojson is None:

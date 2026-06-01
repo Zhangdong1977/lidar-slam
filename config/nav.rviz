@@ -120,12 +120,12 @@ Visualization Manager:
       Use Fixed Frame: true
       Value: true
     - Class: rviz_default_plugins/TF
-      Enabled: false
+      Enabled: true
       Name: TF
       Show Arrows: false
       Show Axes: true
       Show Names: true
-      Marker Scale: 1.0
+      Marker Scale: 5.0
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true

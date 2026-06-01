@@ -389,16 +389,28 @@ lifecycle_manager_localization:
   ros__parameters:
     autostart: true
     node_names: ['map_server', 'amcl']
-    service_call_timeout: 60000.0
     bond_timeout: 10.0
     bond_heartbeat_period: 0.1
     attempt_respawn_reconnection: true
+    # NOTE: This section is no longer used at runtime — lifecycle_starter_localization
+    # (Python node with timeout+retry) has replaced the Nav2 lifecycle_manager for
+    # localization. The section is kept so the YAML remains valid for other launch files.
 
 lifecycle_manager_navigation:
   ros__parameters:
     autostart: true
     node_names: ['controller_server', 'smoother_server', 'planner_server', 'route_server', 'behavior_server', 'velocity_smoother', 'collision_monitor', 'bt_navigator', 'waypoint_follower', 'docking_server']
-    service_call_timeout: 60000.0
     bond_timeout: 10.0
     bond_heartbeat_period: 0.1
     attempt_respawn_reconnection: true
+
+lifecycle_manager_custom:
+  ros__parameters:
+    autostart: true
+    node_names: ['cmd_vel_bridge', 'rs485_chassis_bridge', 'rs485_chassis_receiver', 'opentcs_vehicle_node', 'route_graph_loader', 'vehicle_controller']
+    bond_timeout: 0.0
+    bond_heartbeat_period: 0.1
+    attempt_respawn_reconnection: true
+    # NOTE: This section is no longer used at runtime — lifecycle_starter_custom
+    # (Python node with timeout+retry) has replaced the Nav2 lifecycle_manager for
+    # custom nodes. The section is kept so the YAML remains valid for other launch files.
