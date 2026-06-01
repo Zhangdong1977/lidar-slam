@@ -1,0 +1,35 @@
+# Hardware profile: RS-485 physical chassis + IMU + encoder odometry
+# Real Ackermann chassis controlled via RS-485 protocol, sensors from car_base_node
+
+hardware_profile: "rs485"
+use_sim_time: false
+
+chassis:
+  type: "rs485"
+  serial_port: "/dev/ttyUSB1"
+  baudrate: 115200
+
+sensors:
+  lidar:
+    type: "rplidar"
+    model: "rplidar_s2l"
+    frame: "laser"
+    serial_port: "/dev/ttyUSB0"
+    baudrate: 1000000
+  imu:
+    type: "car_base"
+    topic: "/imu/data_raw"
+  odom:
+    type: "car_base"
+    topic: "/odom"
+
+frames:
+  base_frame: "base_link"
+  odom_frame: "odom"
+  lidar_frame: "laser"
+
+vehicle:
+  wheel_base: 0.58
+  max_steering_angle: 0.5236
+  max_velocity: 1.4
+  lidar_height: 0.22

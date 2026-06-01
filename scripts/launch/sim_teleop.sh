@@ -11,4 +11,4 @@ conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 source "${LIDAR_SLAM_ROOT}/install/setup.bash"
 
-exec ros2 run lidar_slam_nodes sim_teleop
+exec ros2 run lidar_slam_nodes ackermann_keyboard_teleop

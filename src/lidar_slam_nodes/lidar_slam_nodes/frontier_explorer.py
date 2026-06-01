@@ -57,6 +57,7 @@ class FrontierExplorer(Node):
         self.declare_parameter('long_range_enabled', True)
         self.declare_parameter('long_range_min_cluster_size', 50)
         self.declare_parameter('max_unknown_ratio', 0.15)
+        self.declare_parameter('base_frame', 'body_link')
 
         self.frontier_min_size = self.get_parameter('frontier_min_size').value
         self.size_weight = self.get_parameter('size_weight').value
@@ -78,6 +79,7 @@ class FrontierExplorer(Node):
         self.long_range_enabled = self.get_parameter('long_range_enabled').value
         self.long_range_min_cluster_size = self.get_parameter('long_range_min_cluster_size').value
         self.max_unknown_ratio = self.get_parameter('max_unknown_ratio').value
+        self.base_frame = self.get_parameter('base_frame').value
         completion_check_count = self.get_parameter('completion_check_count').value
         explore_rate = self.get_parameter('explore_rate').value
 
@@ -139,7 +141,7 @@ class FrontierExplorer(Node):
     def get_robot_pose(self):
         try:
             t = self.tf_buffer.lookup_transform(
-                'map', 'body_link', rclpy.time.Time())
+                'map', self.base_frame, rclpy.time.Time())
             tx = t.transform.translation.x
             ty = t.transform.translation.y
             q = t.transform.rotation

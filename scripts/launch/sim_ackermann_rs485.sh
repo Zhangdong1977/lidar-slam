@@ -18,6 +18,7 @@ eval "$(conda shell.bash hook)"
 conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_LOCALHOST_ONLY=1
 unset ROS_DISCOVERY_SERVER
 LIDAR_SLAM_ROOT="${LIDAR_SLAM_ROOT:-/home/hello/lidar-slam}"
 source "${LIDAR_SLAM_ROOT}/install/setup.bash"

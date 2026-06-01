@@ -92,7 +92,20 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
-    # 7. RViz2
+    # 7. Lifecycle starter: activate vehicle_controller LifecycleNode
+    lifecycle_starter = Node(
+        package='lidar_slam_nodes',
+        executable='lifecycle_starter',
+        name='lifecycle_starter',
+        parameters=[{
+            'node_names': ['vehicle_controller'],
+            'timeout': 5.0,
+            'retries': 3,
+        }],
+        output='screen',
+    )
+
+    # 8. RViz2
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
@@ -126,5 +139,10 @@ def generate_launch_description():
             actions=[slam_toolbox],
         ),
         laser_tf,
+        # Activate vehicle_controller after ackermann_control has started it (12s delay inside)
+        TimerAction(
+            period=15.0,
+            actions=[lifecycle_starter],
+        ),
         rviz2,
     ])

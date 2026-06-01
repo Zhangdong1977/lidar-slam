@@ -1895,3 +1895,219 @@ Launch argument `simulation:=True/False` 控制节点启停：
 | CANCELLED | false | 空 | 操作员或 Sidecar 取消 |
 | TIMEOUT | false | MATERIAL_ACTION_TIMEOUT | 超过配置超时未完成 |
 
+---
+
+## 十一、scripts/tools/cleanup_ros2.sh 自杀 bug 修复 (2026-06-01)
+
+### 11.1 问题现象
+
+执行 `./scripts/launch/gazebo_opentcs_nav.sh` 后, 只看到 cleanup 输出, 没有 launch 输出,
+直接回到 shell 提示符, 日志文件 (`log/gazebo_opentcs_nav_*.log`) 也没生成。
+
+### 11.2 根因
+
+`cleanup_ros2.sh` 中使用 `pkill -f "<pattern>"` 杀进程, 但 `pkill -f` 按**命令行字符串**匹配。
+
+启动脚本 `gazebo_opentcs_nav.sh` 的命令行包含 `ros2 launch ...` 这段字符串 (还没执行, 只是写在脚本里)。
+`pkill -f "ros2 launch"` 会**同时匹配到调用它的父 bash 进程** (因为父 bash 的命令行
+=`bash gazebo_opentcs_nav.sh`, 里面就含 "ros2 launch"), 把脚本自己的 bash 杀掉, 导致
+后续 `exec ros2 launch ...` 永远执行不到。
+
+### 11.3 修复方案
+
+新增 `pk()` 包装函数替代裸 `pkill`:
+
+- 用 `pgrep -f "<pattern>"` 拿到匹配 PID
+- 排除 `$$` (当前 shell) 和 `$PARENT_PID` (调用本脚本的父 shell)
+- 用 `kill -<signal> <pid>` 逐个发信号 (避免 pkill -f + 显式 PID 同时使用的歧义)
+- `-9` 自动转换为 `SIGKILL`, 其它使用 `SIGTERM`
+
+将原脚本中所有 `pkill` / `pkill -9` 替换为 `pk pkill` / `pk pkill -9`。
+
+### 11.4 验证
+
+- 独立测试: `pk` 不会误杀调用者, 但能 SIGTERM/SIGKILL 杀真实匹配进程
+- 集成测试: 在命令行包含 `ros2 launch` 的父 shell 中执行 `cleanup_ros2.sh`,
+  输出正常到 `=== Cleanup complete ===`, 退出码 0, 调用者未被自杀
+
+### 11.5 涉及文件
+
+- `scripts/tools/cleanup_ros2.sh` (新增 `pk()` 函数, 全部 `pkill` 改为 `pk pkill`)
+
+---
+
+## 十二、scripts/launch/ 启动脚本重命名 (2026-06-01, vscode 断连根因修复)
+
+### 12.1 问题现象
+
+执行 `scripts/launch/gazebo_opentcs_nav.sh` 后, vscode remote-ssh 每次都断开连接。
+但脚本能跑出 cleanup 输出, 也能看到 ros2 launch 启动了一段时间, 只是
+"过一会儿 vscode 弹 Connection lost"。
+
+### 12.2 根因 (经 Explore agent 实证分析)
+
+`cleanup_ros2.sh` 用 `pkill -f "<pattern>"` 按**命令行字符串**匹配进程。
+其中模式 `"gazebo"` 来自第 91/147 行的 `pk pkill -f "gazebo"`.
+
+启动脚本**自身文件名**叫 `gazebo_opentcs_nav.sh`, 它的命令行
+`bash scripts/launch/gazebo_opentcs_nav.sh` 包含子串 `gazebo`.
+
+进程树:
+```
+vscode ptyHost
+  └─ 集成终端 bash (--init-file ...shellIntegration-bash.sh)
+       └─ bash scripts/launch/gazebo_opentcs_nav.sh   (P_SCRIPT, cmdline 含 "gazebo")
+            └─ bash scripts/tools/cleanup_ros2.sh     (P_CLEANUP = $$)
+```
+
+`pk()` 只保护 `$$` 和 `PARENT_PID` (cleanup 的直接父进程).
+标准链下 P_SCRIPT = PARENT_PID, 表面安全.
+但 Explore agent 通过实测确认以下**边界 case** 让单层保护失效, P_SCRIPT 被 SIGKILL:
+1. `gazebo_opentcs_nav.sh` 内部 `exec ros2 launch` 后, 旧 P_SCRIPT 被替换, PPID 链断裂
+2. cleanup 被嵌套调用 (`bash -c "bash cleanup_ros2.sh"` 等)
+3. cleanup 第二次执行时老的 ros2 launch 树还残留, PPID 已被 init 收养
+
+P_SCRIPT 被 SIGKILL 后, P_TERMINAL (vscode 集成终端) 失去唯一前台任务, ptyHost
+误判 pty 关闭, 引发 `Remote-SSH: Connection lost`, vscode 客户端断连.
+
+### 12.3 修复方案: 重命名启动脚本 (从源头消除)
+
+将 `scripts/launch/*.sh` 中所有含 cleanup 模式子串的命名改为**纯场景命名**:
+
+| 旧名 | 新名 |
+|------|------|
+| `gazebo_explore.sh`        | `sim_explore.sh`        |
+| `gazebo_opentcs_kernal.sh` | `sim_opentcs_kernal.sh` |
+| `gazebo_opentcs_nav.sh`    | `sim_opentcs_nav.sh`    |
+| `gazebo_opentcs_overview.sh` | `sim_opentcs_overview.sh` |
+| `gazebo_slam.sh`           | `sim_slam.sh`           |
+| `raspberry_explore.sh`     | `rpi_explore.sh`        |
+| `raspberry_opentcs.sh`     | `rpi_opentcs.sh`        |
+| `raspberry_opentcs_kernal.sh` | `rpi_opentcs_kernal.sh` |
+| `raspberry_opentcs_nav.sh` | `rpi_opentcs_nav.sh`    |
+| `raspberry_opentcs_overview.sh` | `rpi_opentcs_overview.sh` |
+| `raspberry_slam.sh`        | `rpi_slam.sh`           |
+
+**新名避开了全部 41 个 cleanup 模式子串** (`ros2`/`gazebo`/`gz`/`amcl`/`nav2`/`rviz2`/`controller`/`tf2`/`ekf`/`lifecycle`/`socat`/`chassis` 等).
+
+**保留不动的业务标识符** (与 cleanup 无关, 改了会破坏业务):
+- map 文件名 (如 `~/maps/raspberry_auto_map.yaml`)
+- `vehicle_name:=raspberry_agv`
+
+### 12.4 同步修改
+
+- `scripts/launch/*.sh` (11 个) — 文件重命名 + 内部注释/用法行更新
+- `docs/system-architecture.md` — 脚本清单表格 + 进程树注释
+- `scripts/tools/cleanup_ros2.sh` — 顶部加 WARNING 块说明命名约束
+
+第十一节历史记录**保留原样** (描述的 "旧名 gazebo_opentcs_nav.sh" 事实不变).
+
+### 12.5 验证
+
+- 模式扫描: 所有 scripts/launch/*.sh 都不含 cleanup 模式子串 ✅
+- 语法检查: 11 个改过的脚本 + cleanup_ros2.sh 全部 `bash -n` 通过 ✅
+- 不自杀测试: 命令行含 `sim_opentcs_nav` 字符串的父 shell 跑 cleanup,
+  退出码 0, 输出到 `=== Cleanup complete ===`, 调用者未被自杀 ✅
+- 端到端: 由用户在 vscode 集成终端跑 `bash scripts/launch/sim_opentcs_nav.sh`,
+  预期 vscode 不断连
+
+### 12.6 涉及文件
+
+- `scripts/launch/gazebo_*.sh` (5 个) → `scripts/launch/sim_*.sh`
+- `scripts/launch/raspberry_*.sh` (6 个) → `scripts/launch/rpi_*.sh`
+- `scripts/tools/cleanup_ros2.sh` (顶部加 WARNING 注释)
+- `docs/system-architecture.md` (脚本清单)
+- 本文件 (本节新增)
+
+---
+
+## 十三、sim_* 脚本添加 ROS_LOCALHOST_ONLY=1 (2026-06-01, VSCode 断链第二轮修复)
+
+### 13.1 问题现象
+
+重命名修复 (第十二节) 后, 用户在仿真服务器上执行 `sim_opentcs_nav.sh`,
+VSCode Remote SSH 仍在**启动过程中**断链 (cleanup 完成, Gazebo/Nav2 节点启动期间)。
+服务器 32GB RAM, 排除 OOM。
+
+### 13.2 根因
+
+仿真脚本设置了 `RMW_IMPLEMENTATION=rmw_fastrtps_cpp` (Fast-DDS), 但**未设置**
+`ROS_LOCALHOST_ONLY=1`. 启动时 25+ 个 ROS2 节点同时上线, 每个节点向**所有网络接口**
+发送 UDP 多播发现报文 (端口 7400/7401). 多播风暴涌入物理网卡 (SSH 使用的同一网卡),
+挤占 SSH keepalive 数据包, 导致 SSH 超时 → VSCode "Connection lost".
+
+断链时机与"启动过程中"吻合: 节点大量启动 = 多播突发高峰。
+
+### 13.3 修复方案
+
+在所有 **sim_* 仿真脚本**中, `RMW_IMPLEMENTATION` 之后添加:
+
+```bash
+export ROS_LOCALHOST_ONLY=1
+```
+
+**仅修改 sim_* 脚本** — 真实硬件脚本 (`rpi_*`, `real_*`, `rs485_nav.sh`) 不改,
+它们可能需要跨机 DDS 通信。
+
+**修改的脚本** (9 个):
+- `sim_opentcs_nav.sh`, `sim_slam.sh`, `sim_explore.sh`, `sim_opentcs_kernal.sh`
+- `sim_ackermann_nav.sh`, `sim_ackermann_rs485.sh`, `sim_ackermann_opentcs.sh`
+- `sim_ackermann_slam.sh`, `sim_ackermann_explore.sh`
+
+### 13.4 同步修改: cleanup_ros2.sh 加固
+
+1. `pkill -f "rqt"` → `pkill -f "rqt_"` (SIGTERM + SIGKILL 共 2 处)
+   原因: `"rqt"` 太宽泛, 可能匹配非 rqt 进程; 实际 rqt 工具名为 `rqt_gui` 等
+2. `/dev/shm` 清理改为 `find ... -user $(id -u)` 限定当前用户, 避免误删其他用户文件
+
+### 13.5 涉及文件
+
+- `scripts/launch/sim_*.sh` (9 个) — 添加 `ROS_LOCALHOST_ONLY=1`
+- `scripts/tools/cleanup_ros2.sh` — 收紧 rqt 模式 + 安全共享内存清理
+- 本文件 (本节新增)
+
+---
+
+## 35. 修复 LifecycleNode 未激活导致机器人不动 (2026-06-01)
+
+### 根因分析
+
+多个 launch 文件中 `cmd_vel_bridge` 和 `vehicle_controller` 是 LifecycleNode，但没有配置 `lifecycle_starter` 来执行 configure+activate。节点启动后停留在 `unconfigured` 状态，不订阅任何话题、不发布任何数据。
+
+**受影响的数据流**：
+```
+Nav2 controller → /cmd_vel → [cmd_vel_bridge: LifecycleNode] → /steering_angle + /velocity
+  → [vehicle_controller: LifecycleNode] → /forward_*_controller/commands → Gazebo
+```
+
+两个节点都未激活 → Nav2 的速度命令无法传递到 Gazebo → 机器人永远不动。
+
+### 35.1 受影响的 launch 文件
+
+| 文件 | 缺失的 LifecycleNode |
+|------|---------------------|
+| `sim_ackermann_explore.launch.py` | `cmd_vel_bridge` + `vehicle_controller` |
+| `sim_ackermann_nav.launch.py` | `cmd_vel_bridge` + `vehicle_controller` |
+| `sim_ackermann_opentcs.launch.py` | `cmd_vel_bridge` + `vehicle_controller` |
+
+### 35.2 修复方案
+
+为每个受影响的 launch 文件添加 `lifecycle_starter_*` 节点，管理 `cmd_vel_bridge` 和 `vehicle_controller` 的生命周期。参照已正常工作的 `sim_ackermann_rs485.launch.py` 中的 `lifecycle_starter_custom` 模式。
+
+| 文件 | 新增节点 | 管理的节点列表 | TimerAction |
+|------|---------|--------------|-------------|
+| `sim_ackermann_explore.launch.py` | `lifecycle_starter_explore` | `cmd_vel_bridge`, `vehicle_controller` | T+25s |
+| `sim_ackermann_nav.launch.py` | `lifecycle_starter_nav` | `cmd_vel_bridge`, `vehicle_controller` | T+25s |
+| `sim_ackermann_opentcs.launch.py` | `lifecycle_starter_opentcs` | `cmd_vel_bridge`, `vehicle_controller` | T+25s |
+
+### 35.3 lifecycle_starter 参数
+
+```yaml
+node_names: ['cmd_vel_bridge', 'vehicle_controller']
+configure_timeout: 30.0
+activate_timeout: 30.0
+max_retries: 5
+retry_delay: 2.0
+startup_delay: 5.0    # 等待 DDS 发现目标节点
+monitor_period: 0.0    # 禁用健康监控（避免嵌套 spin_one 问题）
+```

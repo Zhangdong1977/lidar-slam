@@ -1,0 +1,35 @@
+# Hardware profile: Gazebo full simulation
+# All sensors and chassis simulated via Gazebo Harmonic + ros_gz_bridge
+
+hardware_profile: "gazebo"
+use_sim_time: true
+
+chassis:
+  type: "gazebo"
+  # Gazebo uses vehicle_controller + ros2_control, no serial port needed
+  serial_port: "/tmp/chassis_cmd"
+  baudrate: 115200
+
+sensors:
+  lidar:
+    type: "gazebo_bridge"
+    frame: "ackermann_robot/body_link/lidar"
+    serial_port: ""
+    baudrate: 0
+  imu:
+    type: "gazebo_bridge"
+    topic: "/imu"
+  odom:
+    type: "gazebo_bridge"
+    topic: "/odom"
+
+frames:
+  base_frame: "body_link"
+  odom_frame: "odom"
+  lidar_frame: "ackermann_robot/body_link/lidar"
+
+vehicle:
+  wheel_base: 0.58
+  max_steering_angle: 0.5236
+  max_velocity: 1.4
+  lidar_height: 0.22

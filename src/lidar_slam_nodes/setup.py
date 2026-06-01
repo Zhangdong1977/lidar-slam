@@ -37,6 +37,7 @@ setup(
             'wait_for_service = lidar_slam_nodes.wait_for_service:main',
             'node_watchdog = lidar_slam_nodes.node_watchdog:main',
             'lifecycle_starter = lidar_slam_nodes.lifecycle_starter:main',
+            'battery_bridge = lidar_slam_nodes.battery_bridge:main',
         ],
     },
 )

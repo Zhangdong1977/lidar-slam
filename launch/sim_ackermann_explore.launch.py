@@ -116,11 +116,31 @@ def generate_launch_description():
     )
 
     # 8. cmd_vel_bridge: Nav2 Twist -> Ackermann steering_angle/velocity
+    #     (LifecycleNode, managed by lifecycle_starter_explore)
     cmd_vel_bridge = Node(
         package='lidar_slam_nodes',
         executable='cmd_vel_bridge',
         output='screen',
         parameters=[{'use_sim_time': True}],
+    )
+
+    # 8b. Lifecycle starter for cmd_vel_bridge + vehicle_controller
+    #     Both are LifecycleNodes that need explicit configure+activate
+    lifecycle_starter_explore = Node(
+        package='lidar_slam_nodes',
+        executable='lifecycle_starter',
+        name='lifecycle_starter_explore',
+        output='screen',
+        parameters=[{
+            'node_names': ['cmd_vel_bridge', 'vehicle_controller'],
+            'configure_timeout': 30.0,
+            'activate_timeout': 30.0,
+            'max_retries': 5,
+            'retry_delay': 2.0,
+            'startup_delay': 5.0,
+            'monitor_period': 0.0,
+            'starter_name': 'explore',
+        }],
     )
 
     # 9. Wait for TF tree: body_link -> map (slam_toolbox localization)
@@ -170,8 +190,9 @@ def generate_launch_description():
         laser_tf,
         TimerAction(period=5.0, actions=[ekf]),
         TimerAction(period=5.0, actions=[slam_toolbox]),
-        TimerAction(period=25.0, actions=[navigation]),
         cmd_vel_bridge,
+        TimerAction(period=25.0, actions=[navigation]),
+        TimerAction(period=25.0, actions=[lifecycle_starter_explore]),
         rviz2,
         # Wait for TF tree, then launch explore + map_saver
         TimerAction(period=30.0, actions=[wait_tf]),

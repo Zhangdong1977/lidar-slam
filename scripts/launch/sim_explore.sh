@@ -1,17 +1,17 @@
 #!/bin/bash
-# sim 仿真建图脚本
-# 启动 sim 仿真车 + slam_toolbox 在线建图
+# sim 仿真自动探索建图脚本
+# 启动 sim 仿真车 + slam_toolbox + frontier_explorer 自动探索
 #
-# 场景定位: 仅 SLAM 建图 (无 Nav2, 无 openTCS)
-# 数据流: Gazebo → /scan + /odom + /imu → slam_toolbox → /map + TF map→odom
-# 适合: 算法验证、地图采集、slam_toolbox 参数调优
+# 场景定位: 自主探索建图 (无 Nav2 BT, 无 openTCS)
+# 数据流: Gazebo → /scan + /odom + /imu → slam_toolbox → /map
+#         frontier_explorer 自动选择 frontier → 2D Nav Goal → Nav2 → /cmd_vel → 底盘
+# 适合: 未知环境自动建图
+#
+# 探索完成后保存地图:
+#   ros2 run nav2_map_server map_saver_cli -f ~/maps/gazebo_auto_map
 #
 # 用法:
-#   ./scripts/launch/sim_slam.sh                       # 默认,使用 config/slam.rviz
-#   ./scripts/launch/sim_slam.sh slam_toolbox_real.yaml # 指定 SLAM 参数
-#
-# 配套: 另开终端运行
-#   ros2 run nav2_map_server map_saver_cli -f ~/maps/gazebo_map
+#   ./scripts/launch/sim_explore.sh
 
 set -e
 
@@ -37,19 +37,19 @@ source "${LIDAR_SLAM_ROOT}/install/setup.bash"
 # 日志输出到 log 目录
 LOG_DIR="${LIDAR_SLAM_ROOT}/log"
 mkdir -p "${LOG_DIR}"
-LOG_FILE="${LOG_DIR}/sim_slam_$(date +%Y-%m-%d_%H-%M-%S).log"
+LOG_FILE="${LOG_DIR}/sim_explore_$(date +%Y-%m-%d_%H-%M-%S).log"
 
 echo "============================================="
-echo "  sim SLAM 建图场景"
+echo "  sim 自动探索建图场景"
 echo "  Profile: sim (仿真)"
-echo "  Launch:  sim_ackermann.launch.py"
+echo "  Launch:  sim_ackermann_explore.launch.py"
 echo "  日志:    ${LOG_FILE}"
 echo "============================================="
 
 # 清理残留进程
 bash "${LIDAR_SLAM_ROOT}/scripts/tools/cleanup_ros2.sh"
 
-# 启动 sim + SLAM
-exec ros2 launch "${LIDAR_SLAM_ROOT}/launch/sim_ackermann.launch.py" "$@" \
+# 启动 sim + 探索
+exec ros2 launch "${LIDAR_SLAM_ROOT}/launch/sim_ackermann_explore.launch.py" "$@" \
     < /dev/null \
     >> "${LOG_FILE}" 2>&1

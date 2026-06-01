@@ -118,11 +118,30 @@ def generate_launch_description():
     )
 
     # 8. cmd_vel_bridge: Nav2 Twist -> Ackermann steering_angle/velocity
+    #     (LifecycleNode, managed by lifecycle_starter_opentcs)
     cmd_vel_bridge = Node(
         package='lidar_slam_nodes',
         executable='cmd_vel_bridge',
         output='screen',
         parameters=[{'use_sim_time': True}],
+    )
+
+    # 8b. Lifecycle starter for cmd_vel_bridge + vehicle_controller
+    lifecycle_starter_opentcs = Node(
+        package='lidar_slam_nodes',
+        executable='lifecycle_starter',
+        name='lifecycle_starter_opentcs',
+        output='screen',
+        parameters=[{
+            'node_names': ['cmd_vel_bridge', 'vehicle_controller'],
+            'configure_timeout': 30.0,
+            'activate_timeout': 30.0,
+            'max_retries': 5,
+            'retry_delay': 2.0,
+            'startup_delay': 5.0,
+            'monitor_period': 0.0,
+            'starter_name': 'opentcs',
+        }],
     )
 
     # 9. RViz2
@@ -155,6 +174,10 @@ def generate_launch_description():
         TimerAction(
             period=25.0,
             actions=[navigation],
+        ),
+        TimerAction(
+            period=25.0,
+            actions=[lifecycle_starter_opentcs],
         ),
         cmd_vel_bridge,
         rviz2,

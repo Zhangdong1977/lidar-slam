@@ -1,0 +1,46 @@
+# Hardware profile: Raspberry Pi car (YeahBot)
+# car_base_node drives STM32 via UART, provides all sensor data
+# RPLIDAR C1 provides laser scan
+
+hardware_profile: "raspberry"
+use_sim_time: false
+
+chassis:
+  type: "uart_stm32"
+  package: "car_base"
+  executable: "car_base_node"
+  serial_port: "/dev/ttyAMA0"
+  baudrate: 115200
+
+sensors:
+  lidar:
+    type: "rplidar"
+    model: "rplidar_c1"
+    frame: "lidar_link"
+    serial_port: "/dev/lidar"
+    baudrate: 460800
+  imu:
+    type: "car_base"
+    topic: "/imu/data_raw"
+    frame: "imu_link"
+  odom:
+    type: "car_base"
+    topic: "/odom"
+
+frames:
+  base_frame: "base_link"
+  odom_frame: "odom"
+  lidar_frame: "lidar_link"
+  imu_frame: "imu_link"
+
+vehicle:
+  wheel_base: 0.175
+  max_steering_angle: 0.785
+  max_velocity: 0.3
+  lidar_height: 0.15
+  footprint: "[ [0.12, 0.10], [0.12, -0.10], [-0.12, -0.10], [-0.12, 0.10] ]"
+
+car_base:
+  odom_frame_id: "odom"
+  robot_frame_id: "base_link"
+  gyro_frame_id: "imu_link"
