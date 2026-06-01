@@ -59,9 +59,12 @@ class ActionPanel(QtWidgets.QWidget):
         self._order_label = QtWidgets.QLabel('订单: -')
         self._point_label = QtWidgets.QLabel('点位: -')
         self._location_label = QtWidgets.QLabel('位置: -')
+        self._vehicle_label = QtWidgets.QLabel('车辆: -')
+        self._phase_label = QtWidgets.QLabel('阶段: -')
 
         for lbl in (self._job_label, self._order_label,
-                    self._point_label, self._location_label):
+                    self._point_label, self._location_label,
+                    self._vehicle_label, self._phase_label):
             lbl.setWordWrap(True)
             info_layout.addWidget(lbl)
 
@@ -177,6 +180,7 @@ class ActionPanel(QtWidgets.QWidget):
                                                                goal_dict.get('order_id', '-')))
         self._point_label.setText('点位: %s' % goal_dict.get('point_id', '-'))
         self._location_label.setText('位置: %s' % goal_dict.get('location_id', '-'))
+        self._vehicle_label.setText('车辆: %s' % goal_dict.get('vehicle_name', '-'))
 
         self._submit_btn.setEnabled(True)
         self._fail_btn.setEnabled(True)
@@ -187,6 +191,10 @@ class ActionPanel(QtWidgets.QWidget):
         # Update detail dialog if already open
         if self._detail_dialog is not None:
             self._detail_dialog.set_goal_data(goal_dict)
+
+    def set_phase(self, phase: str, progress: float):
+        """Update phase display (called from MainWindow on feedback)."""
+        self._phase_label.setText('阶段: %s (%d%%)' % (phase, int(progress * 100)))
 
     def get_message(self) -> str:
         return self._message_edit.text().strip()
@@ -202,7 +210,8 @@ class ActionPanel(QtWidgets.QWidget):
             'border-radius: 8px; padding: 12px 8px; }')
 
         for lbl in (self._job_label, self._order_label,
-                    self._point_label, self._location_label):
+                    self._point_label, self._location_label,
+                    self._vehicle_label, self._phase_label):
             prefix = lbl.text().split(':')[0]
             lbl.setText('%s: -' % prefix)
 

@@ -123,6 +123,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_feedback_updated(self, phase: str, progress: float, message: str):
         self._status_bar.set_phase(phase)
         self._status_bar.set_progress(progress)
+        self._action_panel.set_phase(phase, progress)
 
     @QtCore.pyqtSlot()
     def _on_action_cancelled(self):
@@ -134,7 +135,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._action_panel.reset()
         self._material_table.reset()
         self._status_bar.reset()
-        self._log('Action 完成: %s %s' % (status, message or ''))
+        if status == 'TIMEOUT':
+            self._log('Action 超时: %s' % (message or ''))
+        elif status == 'CANCELLED':
+            self._log('Action 已取消: %s' % (message or ''))
+        else:
+            self._log('Action 完成: %s %s' % (status, message or ''))
 
     # ---- Slots for button clicks ----
 

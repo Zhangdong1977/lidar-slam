@@ -2,6 +2,18 @@
 
 from PyQt5 import QtCore, QtWidgets
 
+_PHASE_DISPLAY = {
+    'ACCEPTED': '已接受',
+    'CHECKING': '检查中',
+    'MOVING_TO_STATION': '前往站点',
+    'MOVING_ACTUATOR': '执行器运动',
+    'PICKING': '拾取中',
+    'PLACING': '放置中',
+    'VERIFYING': '验证中',
+    'COMPLETING': '完成中',
+    'IDLE': '空闲',
+}
+
 
 class StatusBar(QtWidgets.QWidget):
     """Top-level status bar: connection indicator, phase label, progress bar."""
@@ -44,7 +56,8 @@ class StatusBar(QtWidgets.QWidget):
                 'font-size: 18px; font-weight: bold; color: red;')
 
     def set_phase(self, phase: str):
-        self._phase_label.setText('阶段: %s' % phase)
+        display = _PHASE_DISPLAY.get(phase, phase)
+        self._phase_label.setText('阶段: %s' % display)
 
     def set_progress(self, progress: float):
         self._progress_bar.setValue(int(progress * 100))

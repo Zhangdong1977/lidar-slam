@@ -1852,3 +1852,46 @@ Launch argument `simulation:=True/False` 控制节点启停：
 7. **变量命名**：`_managed_clients` 避免与 rclpy Node 内部 `_clients` (list) 冲突
 8. **参数类型**：`node_names` 默认值 `['']`（非 `[]`），确保 ROS2 识别为 STRING_ARRAY 而非 BYTE_ARRAY
 
+
+## 39. Material Action P0/P1 完善（2026-06-01）
+
+**问题**：
+1. `material_action_server.py` 无超时机制 — 配置声明 `action_timeout_ms: 300000` 但从未读取，execute 回调无限等待
+2. Cancel 竞态 — `_cancel_requested` 和 `_result_event` 无原子保护，cancel 与 submit 可同时触发
+3. Cancel 路径错误调用 `goal_handle.succeed()` 而非 `canceled()`
+4. 缺少 TIMEOUT Result 状态
+5. Feedback 阶段仅有 ACCEPTED/CHECKING，不够丰富
+
+**修改**：
+
+### material_action_server.py 核心重写
+- 引入 `GoalState` 枚举（IDLE/ACTIVE/CANCELLING/SUBMITTING/TIMED_OUT/COMPLETED），用 `_goal_lock` 保护，消除竞态
+- 新增超时机制：每轮询周期检查 `time.monotonic()`，超时后原子切换到 `TIMED_OUT`
+- Cancel 路径改用 `goal_handle.canceled()`，确保客户端不收到"成功"
+- 提交/取消方法（`submit_result`/`cancel_result`）加锁检查 `_goal_state == ACTIVE`
+- 拆分终态处理为 `_handle_cancel()` / `_handle_timeout()` / `_handle_submit()`
+- Feedback 扩展到 5 个初始阶段：ACCEPTED → CHECKING → MOVING_TO_STATION → MOVING_ACTUATOR → PICKING/PLACING
+
+### 新增参数
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `action_timeout_ms` | 300000 (5min) | 默认超时 |
+| `load_timeout_ms` | -1 | 装货超时，-1 用默认 |
+| `unload_timeout_ms` | -1 | 卸货超时，-1 用默认 |
+
+配置文件：`config/material_action.yaml`
+
+### GUI 增强（P1）
+- `status_bar.py`：阶段名中文映射（ACCEPTED→已接受、CHECKING→检查中等）
+- `action_panel.py`：新增车辆名和实时阶段/进度标签
+- `main_window.py`：feedback 更新 ActionPanel 阶段显示；区分超时/取消日志
+
+### Result 状态语义
+| 状态 | success | error_code | 触发条件 |
+|------|---------|------------|----------|
+| SUCCEEDED | true | 空 | 所有物料勾选 |
+| PARTIAL | true | 空 | 部分物料勾选 |
+| FAILED | false | LOAD_FAILED / UNLOAD_FAILED | 全部失败或操作员点"全部失败" |
+| CANCELLED | false | 空 | 操作员或 Sidecar 取消 |
+| TIMEOUT | false | MATERIAL_ACTION_TIMEOUT | 超过配置超时未完成 |
+

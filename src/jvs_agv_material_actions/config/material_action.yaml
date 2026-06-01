@@ -1,4 +1,6 @@
 material_action_server:
   ros__parameters:
     vehicle_name: "ackermann_robot"
-    action_timeout_ms: 300000
+    action_timeout_ms: 300000    # 5 minutes default timeout
+    load_timeout_ms: -1          # -1 = use action_timeout_ms
+    unload_timeout_ms: -1        # -1 = use action_timeout_ms

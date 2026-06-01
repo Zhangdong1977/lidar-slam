@@ -3,9 +3,15 @@
 Hosts LoadMaterials and UnloadMaterials action servers.
 Uses ActionBridge (QObject) to emit pyqtSignal when goals arrive,
 allowing the Qt GUI to update from the main thread.
+
+Key design:
+  - GoalState atomic state machine prevents cancel/submit/timeout races.
+  - Per-goal timeout read from ROS2 parameters.
+  - Cancel path uses goal_handle.canceled() (not succeed()).
 """
 
 import threading
+import time
 from enum import Enum
 
 from PyQt5 import QtCore
@@ -22,6 +28,19 @@ from jvs_agv_material_msgs.msg import MaterialActual
 class ActionType(Enum):
     LOAD = 'LOAD'
     UNLOAD = 'UNLOAD'
+
+
+class GoalState(Enum):
+    """Atomic lifecycle for a single goal execution.
+
+    Only one transition can win — protected by _goal_lock.
+    """
+    IDLE = 'IDLE'               # No goal active
+    ACTIVE = 'ACTIVE'           # Goal accepted, waiting for GUI/timeout
+    CANCELLING = 'CANCELLING'   # Cancel requested
+    SUBMITTING = 'SUBMITTING'   # GUI submitted result
+    TIMED_OUT = 'TIMED_OUT'     # Timeout expired
+    COMPLETED = 'COMPLETED'     # Result returned to ROS2
 
 
 class GoalData:
@@ -66,7 +85,7 @@ class ActionBridge(QtCore.QObject):
     feedback_updated = QtCore.pyqtSignal(str, float, str)
     # cancelled
     action_cancelled = QtCore.pyqtSignal()
-    # action completed — whether succeeded, failed, or cancelled
+    # action completed — whether succeeded, failed, cancelled, or timed out
     action_finished = QtCore.pyqtSignal(str, str)
 
 
@@ -78,22 +97,30 @@ class MaterialActionServer(Node):
         self._bridge = ActionBridge()
         self._cb_group = ReentrantCallbackGroup()
 
-        # Current goal state
+        # ---- Goal state machine (protected by _goal_lock) ----
         self._goal_lock = threading.Lock()
         self._current_goal: GoalData = None
-        self._result_event = threading.Event()
-        self._cancel_requested = False
+        self._goal_state = GoalState.IDLE
+        self._goal_event = threading.Event()  # generic wake signal
 
-        # Result set by GUI
+        # Result data set by GUI (under _goal_lock)
         self._result_status = ''
         self._result_message = ''
         self._result_materials = []  # list of (checked: bool, material: dict)
 
-        # Vehicle name for validation
+        # ---- Parameters ----
         self.declare_parameter('vehicle_name', 'ackermann_robot')
         self._vehicle_name = self.get_parameter('vehicle_name').value
 
-        # Action servers
+        self.declare_parameter('action_timeout_ms', 300000)
+        self.declare_parameter('load_timeout_ms', -1)    # -1 = use action_timeout_ms
+        self.declare_parameter('unload_timeout_ms', -1)   # -1 = use action_timeout_ms
+
+        self._default_timeout_ms = self.get_parameter('action_timeout_ms').value
+        self._load_timeout_ms = self.get_parameter('load_timeout_ms').value
+        self._unload_timeout_ms = self.get_parameter('unload_timeout_ms').value
+
+        # ---- Action servers ----
         self._load_server = ActionServer(
             self, LoadMaterials, 'load_materials',
             execute_callback=self._execute_load,
@@ -110,7 +137,8 @@ class MaterialActionServer(Node):
         )
 
         self.get_logger().info(
-            'Material action server started (vehicle=%s)' % self._vehicle_name)
+            'Material action server started (vehicle=%s, timeout=%dms)'
+            % (self._vehicle_name, self._default_timeout_ms))
 
     @property
     def bridge(self) -> ActionBridge:
@@ -135,10 +163,16 @@ class MaterialActionServer(Node):
         return GoalResponse.ACCEPT
 
     def _cancel_callback(self, goal_handle):
-        """Handle cancel request."""
-        self.get_logger().info('Cancel requested for goal')
-        self._cancel_requested = True
+        """Handle cancel request with atomic state check."""
+        with self._goal_lock:
+            if self._goal_state != GoalState.ACTIVE:
+                self.get_logger().info(
+                    'Cancel rejected: goal state=%s' % self._goal_state.value)
+                return CancelResponse.REJECT
+            self._goal_state = GoalState.CANCELLING
+        self._goal_event.set()
         self._bridge.action_cancelled.emit()
+        self.get_logger().info('Cancel accepted')
         return CancelResponse.ACCEPT
 
     def _execute_load(self, goal_handle):
@@ -148,16 +182,27 @@ class MaterialActionServer(Node):
         return self._execute(goal_handle, ActionType.UNLOAD, UnloadMaterials)
 
     def _execute(self, goal_handle, action_type: ActionType, action_cls):
-        """Core execution: notify GUI, wait for operator, return result."""
+        """Core execution: notify GUI, wait for operator/timeout/cancel, return result."""
+        # ---- 1. Initialize state ----
         with self._goal_lock:
             self._current_goal = GoalData(action_type, goal_handle)
-            self._result_event.clear()
-            self._cancel_requested = False
+            self._goal_state = GoalState.ACTIVE
+            self._goal_event.clear()
             self._result_status = ''
             self._result_message = ''
             self._result_materials = []
 
-        # Notify GUI
+        goal_start_time = time.monotonic()
+
+        # ---- 2. Resolve timeout ----
+        timeout_ms = self._default_timeout_ms
+        if action_type == ActionType.LOAD and self._load_timeout_ms > 0:
+            timeout_ms = self._load_timeout_ms
+        elif action_type == ActionType.UNLOAD and self._unload_timeout_ms > 0:
+            timeout_ms = self._unload_timeout_ms
+        timeout_sec = timeout_ms / 1000.0
+
+        # ---- 3. Notify GUI ----
         goal_data = self._current_goal
         goal_dict = {
             'action_type': action_type.value,
@@ -174,26 +219,106 @@ class MaterialActionServer(Node):
         }
         self._bridge.goal_received.emit(action_type.value, goal_dict)
 
-        # Feedback: accepted
-        self._publish_feedback(goal_handle, 'ACCEPTED', 0.0, 'Goal accepted')
-        self._publish_feedback(goal_handle, 'CHECKING', 0.1, 'Checking materials')
+        # ---- 4. Initial feedback phases (P1) ----
+        self._publish_feedback(goal_handle, 'ACCEPTED', 0.0,
+            'Goal accepted, vehicle=%s' % goal_data.vehicle_name)
+        self._publish_feedback(goal_handle, 'CHECKING', 0.05,
+            'Checking %d material items' % len(goal_data.materials))
+        self._publish_feedback(goal_handle, 'MOVING_TO_STATION', 0.1,
+            'Navigating to %s/%s' % (goal_data.point_id, goal_data.location_id))
+        self._publish_feedback(goal_handle, 'MOVING_ACTUATOR', 0.15,
+            'Actuator positioning (%s)' % action_type.value)
+        self._publish_feedback(goal_handle,
+            'PICKING' if action_type == ActionType.LOAD else 'PLACING',
+            0.2, 'Waiting for operator confirmation')
 
-        # Wait for operator (GUI button click) or cancel
-        while not self._result_event.is_set():
-            if self._cancel_requested:
-                self._publish_feedback(goal_handle, 'COMPLETING', 1.0, 'Cancelled')
-                result = action_cls.Result()
-                result.success = False
-                result.status = 'CANCELLED'
-                result.message = self._result_message or 'Cancelled by operator'
-                goal_handle.succeed()
-                self._bridge.action_finished.emit('CANCELLED', result.message)
-                self._cleanup_goal()
-                return result
-            self._result_event.wait(timeout=0.2)
+        # ---- 5. Poll loop with timeout ----
+        poll_interval = 0.5  # seconds
+        while True:
+            # Check timeout
+            elapsed = time.monotonic() - goal_start_time
+            remaining = timeout_sec - elapsed
+            if remaining <= 0:
+                with self._goal_lock:
+                    if self._goal_state == GoalState.ACTIVE:
+                        self._goal_state = GoalState.TIMED_OUT
+                self._goal_event.set()
+                break
 
-        # Build result from GUI state
-        self._publish_feedback(goal_handle, 'VERIFYING', 0.9, 'Verifying results')
+            # Wait for any wake signal
+            wait_time = min(poll_interval, remaining + 0.05)
+            self._goal_event.wait(timeout=wait_time)
+
+            with self._goal_lock:
+                state = self._goal_state
+
+            if state in (GoalState.CANCELLING, GoalState.SUBMITTING,
+                         GoalState.TIMED_OUT):
+                break
+            # else: spurious wake or still ACTIVE, loop again
+
+        # ---- 6. Branch on terminal state ----
+        with self._goal_lock:
+            state = self._goal_state
+
+        if state == GoalState.CANCELLING:
+            return self._handle_cancel(goal_handle, action_type, action_cls,
+                                       goal_start_time)
+        elif state == GoalState.TIMED_OUT:
+            return self._handle_timeout(goal_handle, action_type, action_cls,
+                                        goal_start_time)
+        else:
+            return self._handle_submit(goal_handle, action_type, action_cls)
+
+    # ---- Terminal state handlers ----
+
+    def _handle_cancel(self, goal_handle, action_type, action_cls,
+                       start_time: float):
+        """Build CANCELLED result."""
+        self._publish_feedback(goal_handle, 'COMPLETING', 1.0, 'Cancelled')
+        result = action_cls.Result()
+        result.success = False
+        result.status = 'CANCELLED'
+        result.message = self._result_message or 'Cancelled by operator'
+        result.error_code = ''
+        result.current_load = self._build_zero_actual()
+        if action_type == ActionType.LOAD:
+            result.actual_loaded = list(result.current_load)
+        else:
+            result.actual_unloaded = list(result.current_load)
+        goal_handle.canceled()
+        self.get_logger().info('Action %s cancelled' % action_type.value)
+        self._bridge.action_finished.emit('CANCELLED', result.message)
+        self._cleanup_goal()
+        return result
+
+    def _handle_timeout(self, goal_handle, action_type, action_cls,
+                        start_time: float):
+        """Build TIMEOUT result."""
+        elapsed = time.monotonic() - start_time
+        self._publish_feedback(goal_handle, 'COMPLETING', 1.0,
+            'Timeout after %.1fs' % elapsed)
+        result = action_cls.Result()
+        result.success = False
+        result.status = 'TIMEOUT'
+        result.message = 'Action timed out (%.1fs)' % elapsed
+        result.error_code = 'MATERIAL_ACTION_TIMEOUT'
+        result.current_load = self._build_zero_actual()
+        if action_type == ActionType.LOAD:
+            result.actual_loaded = list(result.current_load)
+        else:
+            result.actual_unloaded = list(result.current_load)
+        goal_handle.succeed()  # terminal state, we return the result
+        self.get_logger().warn('Action %s timed out (%.1fs)'
+                               % (action_type.value, elapsed))
+        self._bridge.action_finished.emit('TIMEOUT', result.message)
+        self._cleanup_goal()
+        return result
+
+    def _handle_submit(self, goal_handle, action_type, action_cls):
+        """Build SUCCEEDED/PARTIAL/FAILED result from GUI state."""
+        self._publish_feedback(goal_handle, 'VERIFYING', 0.9,
+                               'Verifying results')
         self._publish_feedback(goal_handle, 'COMPLETING', 1.0, 'Completing')
 
         status = self._result_status
@@ -203,25 +328,13 @@ class MaterialActionServer(Node):
         result.message = message
         result.error_code = ''
 
-        actual_list = []
-        for checked, mat in self._result_materials:
-            ma = MaterialActual()
-            ma.material_code = mat.get('material_code', '')
-            ma.material_name = mat.get('material_name', '')
-            ma.actual_quantity = mat.get('quantity', 0.0) if checked else 0.0
-            ma.unit = mat.get('unit', '')
-            ma.batch_no = mat.get('batch_no', '')
-            ma.container_code = mat.get('container_code', '')
-            ma.inventory_id = mat.get('inventory_id', '')
-            ma.status = 'SUCCEEDED' if checked else 'FAILED'
-            ma.message = ''
-            actual_list.append(ma)
+        actual_list = self._build_actual_from_materials()
 
         if status == 'FAILED':
             result.success = False
             result.status = 'FAILED'
-            result.error_code = 'LOAD_FAILED' if action_type == ActionType.LOAD else 'UNLOAD_FAILED'
-            # Override: all materials FAILED
+            result.error_code = ('LOAD_FAILED' if action_type == ActionType.LOAD
+                                 else 'UNLOAD_FAILED')
             for ma in actual_list:
                 ma.status = 'FAILED'
                 ma.actual_quantity = 0.0
@@ -235,13 +348,11 @@ class MaterialActionServer(Node):
             result.success = False
             result.status = status
 
-        # Set the correct field name depending on action type
         if action_type == ActionType.LOAD:
             result.actual_loaded = actual_list
         else:
             result.actual_unloaded = actual_list
 
-        # current_load same as actual for simulation
         result.current_load = list(actual_list)
 
         goal_handle.succeed()
@@ -251,9 +362,10 @@ class MaterialActionServer(Node):
         self._cleanup_goal()
         return result
 
+    # ---- Helpers ----
+
     def _publish_feedback(self, goal_handle, phase, progress, message):
         """Publish feedback on the goal handle."""
-        # Workaround: access the action type's Feedback via the goal_handle
         try:
             fb = goal_handle.create_feedback()
             fb.phase = phase
@@ -264,28 +376,87 @@ class MaterialActionServer(Node):
             pass
         self._bridge.feedback_updated.emit(phase, progress, message)
 
+    def _build_actual_from_materials(self):
+        """Build MaterialActual list from GUI submit data."""
+        actual_list = []
+        for checked, mat in self._result_materials:
+            ma = MaterialActual()
+            ma.material_code = mat.get('material_code', '')
+            ma.material_name = mat.get('material_name', '')
+            ma.actual_quantity = mat.get('quantity', 0.0) if checked else 0.0
+            ma.unit = mat.get('unit', '')
+            ma.batch_no = mat.get('batch_no', '')
+            ma.container_code = mat.get('container_code', '')
+            ma.inventory_id = mat.get('inventory_id', '')
+            ma.status = 'SUCCEEDED' if checked else 'FAILED'
+            ma.message = ''
+            actual_list.append(ma)
+        return actual_list
+
+    def _build_zero_actual(self):
+        """Build MaterialActual list with all zeros (for cancel/timeout)."""
+        actual_list = []
+        if self._current_goal is None:
+            return actual_list
+        for mat in self._current_goal.materials:
+            ma = MaterialActual()
+            ma.material_code = mat.get('material_code', '')
+            ma.material_name = mat.get('material_name', '')
+            ma.actual_quantity = 0.0
+            ma.unit = mat.get('unit', '')
+            ma.batch_no = mat.get('batch_no', '')
+            ma.container_code = mat.get('container_code', '')
+            ma.inventory_id = mat.get('inventory_id', '')
+            ma.status = 'FAILED'
+            ma.message = ''
+            actual_list.append(ma)
+        return actual_list
+
     def _cleanup_goal(self):
         with self._goal_lock:
             self._current_goal = None
+            self._goal_state = GoalState.COMPLETED
 
     # ---- Called by GUI (main thread) ----
 
     def submit_result(self, status: str, message: str,
-                      materials: list):
+                      materials: list) -> bool:
         """Submit result from GUI. Called from Qt main thread.
 
         Args:
-            status: 'SUCCEEDED', 'PARTIAL', 'FAILED', or 'CANCELLED'
+            status: 'SUCCEEDED', 'PARTIAL', or 'FAILED'
             message: Free-text message from operator
             materials: list of (checked: bool, material_dict: dict)
-        """
-        self._result_status = status
-        self._result_message = message
-        self._result_materials = materials
-        self._result_event.set()
 
-    def cancel_result(self):
-        """Called when operator clicks Cancel in GUI."""
-        self._cancel_requested = True
-        self._result_message = 'Cancelled by operator'
-        self._result_event.set()
+        Returns:
+            True if accepted (goal was ACTIVE), False if ignored.
+        """
+        with self._goal_lock:
+            if self._goal_state != GoalState.ACTIVE:
+                self.get_logger().warn(
+                    'submit_result ignored: goal state=%s'
+                    % self._goal_state.value)
+                return False
+            self._result_status = status
+            self._result_message = message
+            self._result_materials = materials
+            self._goal_state = GoalState.SUBMITTING
+        self._goal_event.set()
+        return True
+
+    def cancel_result(self) -> bool:
+        """Called when operator clicks Cancel in GUI.
+
+        Returns:
+            True if accepted (goal was ACTIVE), False if ignored.
+        """
+        with self._goal_lock:
+            if self._goal_state != GoalState.ACTIVE:
+                self.get_logger().warn(
+                    'cancel_result ignored: goal state=%s'
+                    % self._goal_state.value)
+                return False
+            self._result_message = 'Cancelled by operator'
+            self._goal_state = GoalState.CANCELLING
+        self._goal_event.set()
+        return True
