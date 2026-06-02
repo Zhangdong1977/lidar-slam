@@ -40,6 +40,9 @@ vehicle:
   lidar_height: 0.15
   footprint: "[ [0.12, 0.10], [0.12, -0.10], [-0.12, -0.10], [-0.12, 0.10] ]"
 
+sensing:
+  type: "ekf"  # EKF fuses /odom + /imu
+
 car_base:
   odom_frame_id: "odom"
   robot_frame_id: "base_link"

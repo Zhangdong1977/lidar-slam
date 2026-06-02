@@ -28,6 +28,9 @@ frames:
   odom_frame: "odom"
   lidar_frame: "laser"
 
+sensing:
+  type: "ekf"  # EKF fuses /odom + /imu
+
 vehicle:
   wheel_base: 0.58
   max_steering_angle: 0.5236

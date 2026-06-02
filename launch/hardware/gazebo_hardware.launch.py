@@ -144,9 +144,9 @@ def generate_launch_description():
         executable='wait_for_service',
         output='screen',
         parameters=[{
-            'service_name': '/ackermann_robot/controller_manager/list_controllers',
+            'service_name': '/controller_manager/list_controllers',
             'service_type': 'controller_manager_msgs/srv/ListControllers',
-            'timeout': 60.0,
+            'timeout': 15.0,
             'use_sim_time': use_sim_time,
         }],
     )

@@ -1,8 +1,11 @@
-"""Custom navigation launch with proper lifecycle_manager configuration.
+"""Navigation sub-launch: full Nav2 stack (10 nodes) + lifecycle_manager.
 
+Layer: Middleware (Navigation)
 Based on nav2_bringup/navigation_launch.py (ROS2 Jazzy).
 Changes: lifecycle_manager receives configured_params including service_call_timeout,
 so it can survive transient Fast-DDS RMW timeouts under heavy system load.
+
+Used by: nav_main.launch.py, explore_main.launch.py
 """
 
 import os
@@ -29,7 +32,7 @@ def generate_launch_description():
         RewrittenYaml(
             source_file=params_file,
             root_key=namespace,
-            param_rewrites={'autostart': autostart},
+            param_rewrites={'autostart': autostart, 'use_sim_time': LaunchConfiguration('use_sim_time')},
             convert_types=True,
         ),
         allow_substs=True,

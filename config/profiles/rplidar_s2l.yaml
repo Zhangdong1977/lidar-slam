@@ -1,0 +1,34 @@
+# Hardware profile: Standalone RPLIDAR S2L (no chassis)
+# For walking-around SLAM mapping with laptop + RPLIDAR S2L
+# Uses rf2o laser odometry instead of EKF (no IMU, no wheel odom)
+
+hardware_profile: "rplidar_s2l"
+use_sim_time: false
+
+chassis:
+  type: "none"
+
+sensing:
+  type: "rf2o"  # rf2o laser odometry (no IMU/wheel odom available)
+
+sensors:
+  lidar:
+    type: "rplidar"
+    model: "rplidar_s2l"
+    frame: "laser"
+    serial_port: "/dev/ttyUSB0"
+    baudrate: 1000000
+  imu:
+    type: "none"
+    topic: ""
+  odom:
+    type: "none"
+    topic: ""
+
+frames:
+  base_frame: "base_link"
+  odom_frame: "odom"
+  lidar_frame: "laser"
+
+vehicle:
+  lidar_height: 0.0  # handheld, height irrelevant

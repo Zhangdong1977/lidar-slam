@@ -79,6 +79,11 @@ def main():
     print(MSG)
     print(status_str(speed, steer), flush=True)
 
+    if not sys.stdin.isatty():
+        node.get_logger().warn('stdin is not a TTY — keyboard teleop disabled.')
+        rclpy.shutdown()
+        return
+
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
 

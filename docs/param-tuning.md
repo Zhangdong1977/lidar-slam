@@ -2111,3 +2111,83 @@ retry_delay: 2.0
 startup_delay: 5.0    # 等待 DDS 发现目标节点
 monitor_period: 0.0    # 禁用健康监控（避免嵌套 spin_one 问题）
 ```
+
+---
+
+## 第四十轮: Launch & Scripts 分层架构重构 (2026-06-02)
+
+### 40.1 动机
+
+项目长期迭代后，launch 文件和 scripts 膨胀且职责重叠：
+- 12 个 launch 文件中 5 个旧版使用 TimerAction 硬编码延迟
+- 18+ 个 scripts 中多对功能完全重复（如 sim_slam.sh vs sim_ackermann_slam.sh）
+- 只有 nav_main.launch.py 做了硬件 profile 抽象，其他场景仍各自独立
+
+### 40.2 三层解耦架构
+
+```
+应用层 (3个场景入口)
+  slam_main.launch.py    — 手工建图 (teleop + slam_toolbox)
+  explore_main.launch.py — 自动探索建图 (frontier_explorer + Nav2)
+  nav_main.launch.py     — 调度集成 (openTCS + AMCL + Nav2)
+
+中间层 (复杂子系统)
+  localization.launch.py — AMCL 定位 (ex-localization_custom)
+  navigation.launch.py   — Nav2 导航栈 (ex-navigation_custom)
+
+硬件抽象层 (4种 profile)
+  hardware/gazebo_hardware.launch.py      — Gazebo 仿真
+  hardware/rs485_hardware.launch.py       — RS-485 实车
+  hardware/raspberry_hardware.launch.py   — 树莓派
+  hardware/rplidar_s2l_hardware.launch.py — 纯激光雷达 (新增)
+```
+
+### 40.3 关键变更
+
+| 变更 | 说明 |
+|------|------|
+| 新增 `rplidar_s2l` profile | 支持无底盘的纯激光雷达 SLAM 建图（笔记本电脑+RPLIDAR S2L），使用 rf2o 激光里程计替代 EKF |
+| Profile YAML 新增 `sensing.type` 字段 | `ekf`（默认）或 `rf2o`，让应用层 launch 根据配置决定启动哪个传感器融合节点 |
+| nav_main.launch.py 重构 | 移除内联的 map_server/amcl/lifecycle_starter_localization，改用 IncludeLaunchDescription 引用 localization.launch.py |
+| Scripts 统一入口 | 合并 18+ 个重复脚本为 5 个：slam.sh / explore.sh / dispatch.sh / save_map.sh / teleop.sh |
+| 删除旧文件 | 9 个旧 launch + 20 个旧 scripts 直接删除 |
+
+### 40.4 删除的文件
+
+**Launch 文件 (9个)**:
+- `sim_ackermann.launch.py` → `slam_main.launch.py` (profile=gazebo)
+- `sim_ackermann_nav.launch.py` → `nav_main.launch.py` (profile=gazebo)
+- `sim_ackermann_explore.launch.py` → `explore_main.launch.py` (profile=gazebo)
+- `sim_ackermann_opentcs.launch.py` → `nav_main.launch.py` (profile=gazebo)
+- `sim_ackermann_rs485.launch.py` → `nav_main.launch.py` (profile=rs485)
+- `real_slam.launch.py` → `slam_main.launch.py` (profile=rplidar_s2l)
+- `rplidar_s2l.launch.py` → 内联到 `hardware/rplidar_s2l_hardware.launch.py`
+- `localization_custom.launch.py` → `localization.launch.py` (重命名)
+- `navigation_custom.launch.py` → `navigation.launch.py` (重命名)
+
+**Scripts (20个)**: 合并为 5 个统一入口脚本 (slam/explore/dispatch/save_map/teleop)
+
+### 40.5 新 Scripts 用法
+
+```bash
+# 手工建图
+./scripts/launch/slam.sh                              # gazebo 仿真
+./scripts/launch/slam.sh --profile rs485               # RS-485 实车
+./scripts/launch/slam.sh --profile raspberry            # 树莓派
+./scripts/launch/slam.sh --profile rplidar_s2l          # 纯激光雷达
+./scripts/launch/slam.sh --no-teleop                    # 不启动遥控
+
+# 自动探索建图
+./scripts/launch/explore.sh                             # gazebo 仿真
+./scripts/launch/explore.sh --profile raspberry
+
+# 调度集成
+./scripts/launch/dispatch.sh                            # gazebo 仿真
+./scripts/launch/dispatch.sh --profile rs485 --map /path/map.yaml
+
+# 保存地图
+./scripts/launch/save_map.sh -f maps/my_map
+
+# 键盘遥控 (独立终端)
+./scripts/launch/teleop.sh
+```

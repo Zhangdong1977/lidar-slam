@@ -1,28 +1,25 @@
-"""Unified navigation launch supporting three hardware profiles.
+"""Application layer: Dispatch integration with openTCS fleet management.
+
+Layer: Application (Scene 3 — Dispatch Integration)
 
 Hardware profiles:
   gazebo    — Gazebo full simulation (chassis + sensors simulated)
   rs485     — RS-485 physical chassis + RPLIDAR S2L + car_base_node (odom+IMU)
   raspberry — Raspberry Pi car (car_base_node drives STM32, RPLIDAR C1)
 
+Startup chain (event-driven):
+  [Hardware Layer]     → /scan, /odom, /imu, TF: odom→base
+  [EKF Fusion]         → TF: odom→base (refined)
+  [Localization]       → TF: map→odom (AMCL + map_server)
+  [Nav2 Navigation]    → /cmd_vel, route planning, behavior tree
+  [Application Layer]  → opentcs_vehicle, route_graph_loader, material_action_gui
+
+Cross-layer services: watchdog + lifecycle_starter + rviz2
+
 Usage:
   ros2 launch nav_main.launch.py hardware_profile:=gazebo
   ros2 launch nav_main.launch.py hardware_profile:=rs485
   ros2 launch nav_main.launch.py hardware_profile:=raspberry map_file:=/path/map.yaml
-
-The hardware profile determines:
-  - Which hardware sub-launch is included (sensors + chassis drivers)
-  - EKF frame names (body_link vs base_link)
-  - IMU topic name (/imu vs /imu/data_raw)
-  - Whether cmd_vel_bridge + rs485_bridge are needed
-  - lifecycle_starter_custom node list
-
-Architecture:
-  [Hardware Layer]     → /scan, /odom, /imu, TF: odom→base
-  [EKF Fusion]         → TF: odom→base (refined)
-  [Localization]       → TF: map→odom (AMCL or slam_toolbox)
-  [Nav2 Navigation]    → /cmd_vel
-  [Application Layer]  → opentcs, explore, route, watchdog
 """
 
 import os
@@ -33,7 +30,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     OpaqueFunction,
     RegisterEventHandler,
-    SetEnvironmentVariable,
+    TimerAction,
 )
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
@@ -80,8 +77,9 @@ def generate_launch_description():
     # Use OpaqueFunction to access launch configuration at runtime
     def launch_setup(context):
         profile = LaunchConfiguration('hardware_profile').perform(context)
-        use_respawn = LaunchConfiguration('use_respawn')
-        vehicle_namespace = LaunchConfiguration('namespace')
+        use_respawn_str = LaunchConfiguration('use_respawn').perform(context)
+        use_respawn = use_respawn_str.lower() in ('true', '1', 'yes')
+        vehicle_namespace = LaunchConfiguration('namespace').perform(context)
 
         # Load profile config
         profile_cfg = load_profile_yaml(profile, project_dir)
@@ -126,7 +124,7 @@ def generate_launch_description():
         actions = []
 
         # =====================================================================
-        # Group A: Hardware layer (profile-specific)
+        # Hardware Layer (profile-specific)
         # =====================================================================
 
         hardware_dir = os.path.join(project_dir, 'launch', 'hardware')
@@ -168,7 +166,7 @@ def generate_launch_description():
         actions.extend([hardware_gazebo, hardware_rs485, hardware_raspberry])
 
         # =====================================================================
-        # Group A (common): RViz2 + Watchdog
+        # Cross-layer: Watchdog + RViz2
         # =====================================================================
 
         rviz2 = Node(
@@ -193,7 +191,7 @@ def generate_launch_description():
         actions.extend([rviz2, watchdog])
 
         # =====================================================================
-        # Group B: EKF (after /scan ready)
+        # Sensing Layer: EKF (after /scan ready)
         # =====================================================================
 
         wait_scan = Node(
@@ -203,7 +201,7 @@ def generate_launch_description():
             parameters=[{
                 'topic_name': '/scan',
                 'min_publishers': 1,
-                'timeout': 120.0,
+                'timeout': 30.0,
                 'use_sim_time': use_sim_time,
             }],
         )
@@ -219,7 +217,7 @@ def generate_launch_description():
         )
 
         # =====================================================================
-        # Group E: Localization (after EKF TF ready)
+        # Localization Layer (after EKF TF ready)
         # =====================================================================
 
         wait_ekf_tf = Node(
@@ -230,85 +228,53 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'target_frame': odom_frame,
                 'source_frame': base_frame,
-                'timeout': 60.0,
+                'timeout': 20.0,
                 'check_period': 0.5,
             }],
         )
 
-        map_server = Node(
-            package='nav2_map_server',
-            executable='map_server',
-            name='map_server',
-            output='screen',
-            parameters=[nav2_params, {
-                'yaml_filename': map_file,
-                'use_sim_time': use_sim_time,
-            }],
-            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
-            respawn=use_respawn,
-            respawn_delay=2.0,
+        # Use localization sub-launch instead of inline nodes
+        localization = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(project_dir, 'launch', 'localization.launch.py')),
+            launch_arguments={
+                'map': map_file,
+                'use_sim_time': str(use_sim_time).lower(),
+                'params_file': nav2_params,
+                'autostart': 'True',
+                'use_composition': 'False',
+                'use_respawn': str(use_respawn).lower(),
+                'vehicle_name': LaunchConfiguration('vehicle_name').perform(context),
+
+            }.items(),
         )
 
-        amcl = Node(
-            package='nav2_amcl',
-            executable='amcl',
-            name='amcl',
-            output='screen',
-            parameters=[nav2_params, {
-                'use_sim_time': use_sim_time,
-            }],
-            remappings=[
-                ('/tf', 'tf'),
-                ('/tf_static', 'tf_static'),
-                ('initialpose', ['/', LaunchConfiguration('vehicle_name'), '/initialpose']),
-            ],
-            respawn=use_respawn,
-            respawn_delay=2.0,
-        )
-
-        lifecycle_starter_localization = Node(
-            package='lidar_slam_nodes',
-            executable='lifecycle_starter',
-            name='lifecycle_starter_localization',
-            output='screen',
-            parameters=[{
-                'node_names': ['map_server', 'amcl'],
-                'configure_timeout': 30.0,
-                'activate_timeout': 30.0,
-                'max_retries': 5,
-                'retry_delay': 2.0,
-                'startup_delay': 2.0,
-                'monitor_period': 0.0,
-                'starter_name': 'localization',
-            }],
-        )
-
-        # =====================================================================
-        # Group F: Navigation + Custom lifecycle (after localization ready)
-        # =====================================================================
-
+        # Wait for localization to be ready (use /map topic — reliable DDS discovery)
         wait_localization_ready = Node(
             package='lidar_slam_nodes',
             executable='wait_for_topic',
             output='screen',
             parameters=[{
-                'topic_name': '/lifecycle_starter_localization/ready',
+                'topic_name': '/map',
                 'min_publishers': 1,
-                'timeout': 120.0,
+                'timeout': 30.0,
                 'use_sim_time': use_sim_time,
             }],
         )
 
+        # =====================================================================
+        # Navigation + Application Layer (after localization ready)
+        # =====================================================================
+
         navigation = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource([
-                os.path.join(project_dir, 'launch', 'navigation_custom.launch.py')
-            ]),
+            PythonLaunchDescriptionSource(
+                os.path.join(project_dir, 'launch', 'navigation.launch.py')),
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'autostart': 'True',
                 'params_file': nav2_params,
                 'use_composition': 'False',
-                'use_respawn': 'True',
+                'use_respawn': str(use_respawn).lower(),
             }.items(),
         )
 
@@ -359,7 +325,7 @@ def generate_launch_description():
         )
 
         # =====================================================================
-        # Group G: Application (after route_server ready)
+        # Application: route_graph_loader + material_action_gui
         # =====================================================================
 
         wait_route = Node(
@@ -369,7 +335,7 @@ def generate_launch_description():
             parameters=[{
                 'service_name': '/route_server/set_route_graph',
                 'service_type': 'nav2_msgs/srv/SetRouteGraph',
-                'timeout': 60.0,
+                'timeout': 30.0,
                 'use_sim_time': use_sim_time,
             }],
         )
@@ -401,23 +367,23 @@ def generate_launch_description():
         # Event-driven startup chains
         # =====================================================================
 
-        # Chain 1: /scan ready → EKF
+        # Chain 1: /scan ready → EKF + wait_ekf_tf (gate starts WITH dependency)
         chain_ekf = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_scan,
-                on_exit=[ekf],
+                on_exit=[ekf, wait_ekf_tf],
             )
         )
 
-        # Chain 2: EKF TF ready → localization
+        # Chain 2: EKF TF ready → localization + wait_localization_ready
         chain_localization = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_ekf_tf,
-                on_exit=[map_server, amcl, lifecycle_starter_localization],
+                on_exit=[localization, wait_localization_ready],
             )
         )
 
-        # Chain 3: localization ready → navigation + custom lifecycle
+        # Chain 3: localization ready → navigation + custom lifecycle + wait_route
         chain_navigation = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_localization_ready,
@@ -426,6 +392,7 @@ def generate_launch_description():
                     lifecycle_starter_custom,
                     cmd_vel_bridge_node,
                     opentcs_vehicle,
+                    wait_route,
                 ],
             )
         )
@@ -439,21 +406,17 @@ def generate_launch_description():
         )
 
         # Material action GUI: delayed start
-        from launch.actions import TimerAction
         material_delayed = TimerAction(
             period=5.0,
             actions=[material_action_gui],
         )
 
         actions.extend([
-            # Chain gates
+            # Chain gates (only wait_scan starts at T=0; others start with their dependency)
             wait_scan,
             chain_ekf,
-            wait_ekf_tf,
             chain_localization,
-            wait_localization_ready,
             chain_navigation,
-            wait_route,
             chain_route,
             material_delayed,
         ])

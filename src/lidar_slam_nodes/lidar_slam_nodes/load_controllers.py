@@ -22,7 +22,7 @@ def main():
     config_srv = None
     switch_srv = None
 
-    for base in ['/ackermann_robot/controller_manager', '/controller_manager']:
+    for base in ['/controller_manager', '/ackermann_robot/controller_manager']:
         load_name = f'{base}/load_controller'
         config_name = f'{base}/configure_controller'
         switch_name = f'{base}/switch_controller'
@@ -30,7 +30,7 @@ def main():
         # Wait for services
         node.get_logger().info(f'Waiting for {load_name}...')
         load_cli = node.create_client(LoadController, load_name)
-        if not load_cli.wait_for_service(timeout_sec=30.0):
+        if not load_cli.wait_for_service(timeout_sec=10.0):
             node.get_logger().warn(f'Timeout waiting for {load_name}')
             node.destroy_client(load_cli)
             continue

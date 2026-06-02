@@ -6,18 +6,19 @@
 
 ## 一、系统概述
 
-JVS-AGV 是一套基于 ROS2 Jazzy 的阿克曼（Ackermann）转向 AGV 导航系统，支持**三种硬件配置**一键切换：
+JVS-AGV 是一套基于 ROS2 Jazzy 的阿克曼（Ackermann）转向 AGV 导航系统，采用**三层解耦架构**，支持**四种硬件配置**一键切换：
 
 | 配置 | 底盘 | 传感器 | 适用场景 |
 |------|------|--------|---------|
 | **gazebo** | Gazebo 仿真 (ros2_control) | 仿真 (ros_gz_bridge) | 开发调试、算法验证 |
 | **rs485** | RS-485 协议 MCU (BX-S40) | RPLIDAR S2L + 编码器 + IMU | 实车部署（RS-485 底盘） |
 | **raspberry** | STM32 UART (YeahBot) | RPLIDAR C1 + 编码器 + IMU | 树莓派小车部署 |
+| **rplidar_s2l** | 无底盘 | RPLIDAR S2L | 手持建图（笔记本+雷达） |
 
 ### 1.1 核心能力
 
 - **SLAM 建图**：slam_toolbox 在线异步建图
-- **自主导航**：Nav2 + SmacPlannerHybrid (Reeds-Shepp) + RegulatedPurePursuitController
+- **自主导航**：Nav2 + SmacPlannerHybrid (Dubin) + RegulatedPurePursuitController
 - **自主探索**：frontier_explorer 前端探索 + explore_lite
 - **车队调度**：openTCS-NeNa 集成，车辆状态上报、任务下发、路线图管理
 - **物料操作**：上下货动作服务 (jvs_agv_material_actions)
@@ -41,78 +42,75 @@ JVS-AGV 是一套基于 ROS2 Jazzy 的阿克曼（Ackermann）转向 AGV 导航�
 
 ## 二、系统分层架构
 
+系统采用**三层解耦架构**，应用层 × 中间层 × 硬件层正交组合，任何场景 × 硬件组合都能一行命令启动。
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        应用层 (Application)                         │
-│                                                                     │
-│  opentcs_vehicle_node  ─ openTCS 车队调度集成                       │
-│  frontier_explorer     ─ 自主探索建图                               │
-│  route_graph_loader    ─ GeoJSON 路线图管理                         │
-│  material_action_gui   ─ 上下货动作 GUI (PyQt5)                    │
-│  node_watchdog         ─ 系统健康监控                               │
-│  battery_bridge        ─ 电池状态桥接 (仅 raspberry)                │
-│  lifecycle_starter     ─ 生命周期管理 (替代 Nav2 lifecycle_manager)  │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     导航层 (Navigation)                              │
-│                                                                     │
-│  Nav2 完整导航栈 (navigation_custom.launch.py):                     │
-│  ├ planner_server    SmacPlannerHybrid (Reeds-Shepp, min_r=1.0m)   │
-│  ├ controller_server RegulatedPurePursuitController                │
-│  ├ behavior_server   BackUp + Wait (无 Spin，阿克曼不可原地旋转)    │
-│  ├ velocity_smoother max_vel=0.5m/s                                │
-│  ├ collision_monitor 实时碰撞检测                                   │
-│  ├ bt_navigator      ackermann_nav.xml 行为树                       │
-│  ├ smoother_server   路径平滑                                       │
-│  └ route_server      GeoJSON 路线图服务                             │
-│                                                                     │
-│  行为树策略 (ackermann_nav.xml):                                     │
-│  ├ ComputePathToPose → FollowPath (各 2 次重试)                    │
-│  └ 恢复: BackUp(3.5m) → ClearCostmap → Wait(2s) → BackUp(2m)     │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                   定位/建图层 (Localization/SLAM)                    │
-│                                                                     │
-│  建图模式: slam_toolbox (online_async) → /map + TF map→odom        │
-│  定位模式: map_server + AMCL → TF map→odom + /amcl_pose            │
-│                                                                     │
-│  AMCL 配置: likelihood_field, max_beams=200, 粒子 500~3000         │
-│  SLAM 配置: resolution=0.05, max_range=15.9m                       │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    传感器融合层 (Sensor Fusion)                      │
-│                                                                     │
-│  EKF (robot_localization/ekf_filter_node)                          │
-│  ├ 输入: /odom (里程计) + /imu 或 /imu/data_raw (IMU)              │
-│  ├ 输出: TF odom → base_frame                                      │
-│  ├ 频率: 30Hz, two_d_mode: true                                    │
-│  └ 配置: config/ekf.yaml (frame 由 profile 覆盖)                   │
-└─────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                  硬件抽象层 (Hardware Abstraction)                   │
-│                  ★ hardware_profile 决定 ★                          │
-│                                                                     │
-│  ┌─ gazebo ──────────┐  ┌─ rs485 ─────────────┐  ┌─ raspberry ───┐│
-│  │ gz_sim            │  │ rplidar_node (S2L)  │  │ rplidar_node  ││
-│  │ ros_gz_bridge     │  │ car_base_node       │  │  (C1)         ││
-│  │ socat (虚拟串口)  │  │  (里程计+IMU)       │  │ car_base_node ││
-│  │ rs485_receiver    │  │ cmd_vel_bridge      │  │  (底盘+传感器) ││
-│  │ vehicle_controller│  │ rs485_chassis_bridge│  │ static_tf     ││
-│  │ rs485_bridge      │  │ static_tf           │  │ battery_bridge││
-│  └───────────────────┘  └─────────────────────┘  └───────────────┘│
-│                                                                     │
-│  统一输出话题:                                                       │
-│    /scan (LaserScan), /odom (Odometry), /imu (Imu)                 │
-│    TF: odom → base_frame, base_frame → lidar_frame                 │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         应用层 (Application Layer)                       │
+│                         ★ 三个场景入口 ★                                 │
+│                                                                         │
+│  slam_main.launch.py ── 场景1: 手工建图                                  │
+│    ├ ackermann_keyboard_teleop (可选键盘遥控)                             │
+│    └ slam_toolbox online_async                                          │
+│                                                                         │
+│  explore_main.launch.py ─ 场景2: 自动探索建图                            │
+│    ├ frontier_explorer (前端探索决策)                                     │
+│    └ slam_toolbox + Nav2 (slam 提供定位，无需 AMCL)                      │
+│                                                                         │
+│  nav_main.launch.py ─── 场景3: 调度集成                                   │
+│    ├ opentcs_vehicle_node  ─ openTCS 车队调度集成                        │
+│    ├ route_graph_loader    ─ GeoJSON 路线图管理                          │
+│    └ material_action_gui   ─ 上下货动作 GUI (PyQt5)                     │
+│                                                                         │
+│  ─── 跨层服务 (所有场景共享) ───                                         │
+│  node_watchdog ─ 系统健康监控                                            │
+│  lifecycle_starter ─ 生命周期管理 (替代 Nav2 lifecycle_manager)           │
+│  rviz2 ─ 可视化                                                          │
+│  battery_bridge ─ 电池状态桥接 (仅 raspberry)                            │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       中间层 (Middleware Layer)                           │
+│                       ★ 复杂子系统 ★                                     │
+│                                                                         │
+│  navigation.launch.py ── Nav2 完整导航栈 (10 节点):                      │
+│  ├ planner_server    SmacPlannerHybrid (Dubin, min_r=1.0m)             │
+│  ├ controller_server RegulatedPurePursuitController                    │
+│  ├ behavior_server   BackUp + Wait (无 Spin，阿克曼不可原地旋转)         │
+│  ├ velocity_smoother max_vel=0.5m/s                                    │
+│  ├ collision_monitor 实时碰撞检测                                        │
+│  ├ bt_navigator      ackermann_nav.xml 行为树                            │
+│  ├ smoother_server   路径平滑                                            │
+│  └ route_server      GeoJSON 路线图服务                                  │
+│                                                                         │
+│  localization.launch.py ─ AMCL 定位 (map_server + AMCL):                 │
+│  └ map_server + AMCL → TF map→odom + /amcl_pose                         │
+│                                                                         │
+│  传感器融合 (内联于应用层):                                               │
+│  ├ EKF (robot_localization/ekf_filter_node) — gazebo/rs485/raspberry   │
+│  └ rf2o (rf2o_laser_odometry) — rplidar_s2l (无底盘纯激光里程计)        │
+│                                                                         │
+│  SLAM (内联于应用层):                                                     │
+│  └ slam_toolbox (online_async) → /map + TF map→odom                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    硬件抽象层 (Hardware Abstraction Layer)                │
+│                    ★ hardware_profile 参数决定 ★                         │
+│                                                                         │
+│  ┌─ gazebo ───────┐  ┌─ rs485 ─────────┐  ┌─ raspberry ──┐  ┌─ rplidar_s2l ┐│
+│  │ gz_sim         │  │ rplidar (S2L)   │  │ rplidar (C1) │  │ rplidar (S2L)││
+│  │ ros_gz_bridge  │  │ car_base_node   │  │ car_base_node│  │ static_tf    ││
+│  │ socat (虚拟串口)│  │  (里程计+IMU)   │  │  (底盘+传感器)│  │ (无底盘)     ││
+│  │ rs485_receiver │  │ cmd_vel_bridge  │  │ static_tf    │  └──────────────┘│
+│  │ vehicle_ctrl   │  │ rs485_bridge    │  │ battery_bridge│                  │
+│  │ rs485_bridge   │  │ static_tf       │  └──────────────┘                  │
+│  └────────────────┘  └─────────────────┘                                    │
+│                                                                         │
+│  统一输出: /scan, /odom, /imu, TF: odom→base, base→lidar               │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -125,7 +123,8 @@ JVS-AGV 是一套基于 ROS2 Jazzy 的阿克曼（Ackermann）转向 AGV 导航�
 config/profiles/
 ├── gazebo.yaml       # Gazebo 全仿真
 ├── rs485.yaml        # RS-485 物理底盘
-└── raspberry.yaml    # 树莓派小车 (YeahBot)
+├── raspberry.yaml    # 树莓派小车 (YeahBot)
+└── rplidar_s2l.yaml  # 纯激光雷达建图 (无底盘)
 ```
 
 每个 Profile 文件定义：
@@ -134,8 +133,11 @@ config/profiles/
 hardware_profile: "raspberry"       # 配置名称
 use_sim_time: false                 # 是否使用仿真时钟
 
+sensing:                            # 传感器融合方式
+  type: "ekf"                       # ekf: EKF融合 / rf2o: 激光里程计
+
 chassis:                            # 底盘驱动
-  type: "uart_stm32"                # 底盘类型: gazebo / rs485 / uart_stm32
+  type: "uart_stm32"                # 底盘类型: gazebo / rs485 / uart_stm32 / none
   serial_port: "/dev/ttyAMA0"       # 串口设备
   baudrate: 115200                  # 波特率
 
@@ -157,23 +159,23 @@ vehicle:                            # 车辆参数
   footprint: "[...]"                # 车身轮廓 (m)
 ```
 
-### 3.2 三种配置参数对比
+### 3.2 四种配置参数对比
 
-| 参数 | gazebo | rs485 | raspberry |
-|------|--------|-------|-----------|
-| **底盘类型** | Gazebo ros2_control | RS-485 协议 MCU | STM32 UART (car_base_node) |
-| **底盘串口** | /tmp/chassis_cmd (虚拟) | /dev/ttyUSB1 | /dev/ttyAMA0 |
-| **Ackermann 解算** | vehicle_controller (ROS侧) | cmd_vel_bridge (ROS侧) | **STM32 内部** |
-| **激光雷达** | Gazebo 仿真 | RPLIDAR S2L (/dev/ttyUSB0) | RPLIDAR C1 (/dev/lidar) |
-| **IMU 来源** | Gazebo 仿真 → /imu | car_base_node → /imu/data_raw | car_base_node → /imu/data_raw |
-| **里程计来源** | Gazebo 仿真 → /odom | car_base_node → /odom | car_base_node → /odom |
-| **base_frame** | body_link | base_link | base_link |
-| **雷达 frame** | ackermann_robot/body_link/lidar | laser | lidar_link |
-| **use_sim_time** | true | false | false |
-| **轴距** | 0.58m | 0.58m | 0.175m |
-| **最大转向角** | 30° (0.5236 rad) | 30° (0.5236 rad) | 45° (0.785 rad) |
-| **最大速度** | 1.4 m/s | 1.4 m/s | 0.3 m/s |
-| **车身尺寸** | 0.9×0.6m | 0.9×0.6m | 0.24×0.2m |
+| 参数 | gazebo | rs485 | raspberry | rplidar_s2l |
+|------|--------|-------|-----------|-------------|
+| **底盘类型** | Gazebo ros2_control | RS-485 协议 MCU | STM32 UART (car_base_node) | 无底盘 |
+| **底盘串口** | /tmp/chassis_cmd (虚拟) | /dev/ttyUSB1 | /dev/ttyAMA0 | — |
+| **Ackermann 解算** | vehicle_controller (ROS侧) | cmd_vel_bridge (ROS侧) | **STM32 内部** | — |
+| **激光雷达** | Gazebo 仿真 | RPLIDAR S2L (/dev/ttyUSB0) | RPLIDAR C1 (/dev/lidar) | RPLIDAR S2L (/dev/ttyUSB0) |
+| **IMU 来源** | Gazebo 仿真 → /imu | car_base_node → /imu/data_raw | car_base_node → /imu/data_raw | 无 |
+| **里程计来源** | Gazebo 仿真 → /odom | car_base_node → /odom | car_base_node → /odom | 无 (rf2o 激光里程计) |
+| **传感器融合** | EKF | EKF | EKF | rf2o |
+| **base_frame** | body_link | base_link | base_link | base_link |
+| **雷达 frame** | ackermann_robot/body_link/lidar | laser | lidar_link | laser |
+| **use_sim_time** | true | false | false | false |
+| **轴距** | 0.58m | 0.58m | 0.175m | — |
+| **最大转向角** | 30° (0.5236 rad) | 30° (0.5236 rad) | 45° (0.785 rad) | — |
+| **最大速度** | 1.4 m/s | 1.4 m/s | 0.3 m/s | — |
 
 ---
 
@@ -293,79 +295,126 @@ STM32 → car_base_node → /odom (编码器) ──→ EKF → AMCL
 
 ## 六、启动流程
 
-### 6.1 统一入口: nav_main.launch.py
+### 6.1 三场景入口 (应用层)
+
+所有场景共享同一套事件驱动启动链模式：`wait_for_*` 门控 → `OnProcessExit` 触发下一层，无 TimerAction 硬编码延迟。
+
+#### 场景1: 手工建图 (slam_main.launch.py)
 
 ```
-事件驱动启动链 (严格依赖顺序):
-
 [立即启动]
   ├ 硬件层子 launch (根据 hardware_profile 选择)
   │   ├ gazebo: socat, gz_sim, ros_gz_bridge, robot_state_publisher, ...
-  │   ├ rs485: rplidar, car_base_node, cmd_vel_bridge, rs485_bridge (3s延迟)
-  │   └ raspberry: rplidar_c1, car_base_node, battery_bridge
+  │   ├ rs485: rplidar, car_base_node, ...
+  │   ├ raspberry: rplidar_c1, car_base_node, battery_bridge
+  │   └ rplidar_s2l: rplidar_node, static_tf
   ├ rviz2
   └ node_watchdog
        │
        ▼ wait_for_topic(/scan, timeout=120s)
-[传感器融合]
-  └ ekf_filter_node
+[传感器融合] (根据 profile sensing.type 决定)
+  ├ EKF (gazebo/rs485/raspberry): ekf_filter_node
+  └ rf2o (rplidar_s2l): rf2o_laser_odometry
        │
        ▼ wait_for_tf(odom→base, timeout=60s)
-[定位]
-  ├ map_server (加载地图)
-  ├ amcl (粒子滤波定位)
-  └ lifecycle_starter_localization
+[SLAM]
+  └ slam_toolbox online_async → /map + TF map→odom
        │
-       ▼ wait_for_topic(/lifecycle_starter_localization/ready, timeout=120s)
+       ▼ 3s 延迟
+[Teleop]
+  └ ackermann_keyboard_teleop (可选, use_teleop:=True)
+```
+
+#### 场景2: 自动探索建图 (explore_main.launch.py)
+
+```
+[立即启动]
+  ├ 硬件层 + rviz2 + watchdog (同上)
+       │
+       ▼ wait_for_topic(/scan) → EKF
+       │
+       ▼ wait_for_tf(odom→base)
+[SLAM]
+  └ slam_toolbox online_async (提供 map→odom TF, 无需 AMCL)
+       │
+       ▼ wait_for_tf(map→base, timeout=120s)
+[Nav2 导航]
+  ├ navigation.launch.py (Nav2 全栈, 无 map_server/AMCL)
+  ├ cmd_vel_bridge (gazebo/rs485 only)
+  └ lifecycle_starter_explore
+       │
+       ▼ wait_for_service(Nav2 就绪)
+[探索]
+  └ frontier_explorer → NavigateToPose → Nav2 → /cmd_vel
+```
+
+#### 场景3: 调度集成 (nav_main.launch.py)
+
+```
+[立即启动]
+  ├ 硬件层 + rviz2 + watchdog (同上)
+       │
+       ▼ wait_for_topic(/scan) → EKF
+       │
+       ▼ wait_for_tf(odom→base)
+[定位]
+  └ localization.launch.py (map_server + AMCL)
+       │
+       ▼ wait_for_topic(localization_manager 就绪)
 [导航 + 应用]
-  ├ navigation_custom.launch.py (Nav2 全栈)
+  ├ navigation.launch.py (Nav2 全栈)
   ├ lifecycle_starter_custom (管理自定义 LifecycleNode)
   ├ cmd_vel_bridge (gazebo/rs485 only)
   └ opentcs_vehicle_node
        │
-       ▼ wait_for_service(/route_server/set_route_graph, timeout=60s)
+       ▼ wait_for_service(/route_server/set_route_graph)
 [路线 + 物料]
   ├ route_graph_loader
   └ material_action_gui (5s 延迟)
 ```
 
-### 6.2 启动命令
+### 6.2 统一启动脚本
+
+所有场景通过统一的 shell 脚本入口，`--profile` 参数选择硬件配置：
 
 ```bash
-# Gazebo 仿真
-ros2 launch nav_main.launch.py hardware_profile:=gazebo
+# ── 场景1: 手工建图 ──────────────────────────────────────────
+./scripts/launch/slam.sh                                # gazebo 仿真 (默认)
+./scripts/launch/slam.sh --profile rs485                # RS-485 实车
+./scripts/launch/slam.sh --profile raspberry            # 树莓派
+./scripts/launch/slam.sh --profile rplidar_s2l          # 纯激光雷达 (无底盘)
+./scripts/launch/slam.sh --no-teleop                    # 不启动键盘遥控
+./scripts/launch/slam.sh --slam-params /path/to/params  # 自定义SLAM参数
 
-# RS-485 物理底盘
-bash scripts/launch/rs485_nav.sh [map_file.yaml]
+# ── 场景2: 自动探索建图 ─────────────────────────────────────
+./scripts/launch/explore.sh                             # gazebo 仿真 (默认)
+./scripts/launch/explore.sh --profile raspberry         # 树莓派
 
-# 树莓派小车 (在 Pi 上执行)
-bash /home/pi/jvs/scripts/launch/rpi_opentcs.sh [map_file.yaml]
+# ── 场景3: 调度集成 ─────────────────────────────────────────
+./scripts/launch/dispatch.sh                            # gazebo 仿真 (默认)
+./scripts/launch/dispatch.sh --profile rs485            # RS-485 实车
+./scripts/launch/dispatch.sh --profile raspberry        # 树莓派
+./scripts/launch/dispatch.sh --map /path/to/map.yaml    # 指定地图
 
-# 旧版兼容 (仍可用)
-bash scripts/launch/sim_ackermann_rs485.sh
+# ── 辅助工具 ────────────────────────────────────────────────
+./scripts/launch/save_map.sh -f maps/my_map             # 保存地图
+./scripts/launch/teleop.sh                              # 键盘遥控 (独立终端)
 ```
 
-### 6.3 场景化启动脚本矩阵 (硬件 × 业务场景)
+### 6.3 场景 × 硬件组合矩阵
 
-每个硬件配置 (Gazebo / 树莓派) 都有 5 个标准化启动脚本,覆盖从建图到调度的完整链路:
+| | gazebo (仿真) | rs485 (实车) | raspberry (树莓派) | rplidar_s2l (纯雷达) |
+|---|---|---|---|---|
+| **手工建图** | `slam.sh` | `slam.sh --profile rs485` | `slam.sh --profile raspberry` | `slam.sh --profile rplidar_s2l` |
+| **自动探索** | `explore.sh` | `explore.sh --profile rs485` | `explore.sh --profile raspberry` | — |
+| **调度集成** | `dispatch.sh` | `dispatch.sh --profile rs485` | `dispatch.sh --profile raspberry` | — |
 
-| 场景 | Gazebo | 树莓派 |
-|------|--------|--------|
-| **SLAM 建图** | `sim_slam.sh` | `rpi_slam.sh` |
-| **自动探索建图** | `sim_explore.sh` | `rpi_explore.sh` |
-| **openTCS 导航** | `sim_opentcs_nav.sh [map]` | `rpi_opentcs_nav.sh [map]` |
-| **openTCS Kernel** | `sim_opentcs_kernal.sh` | `rpi_opentcs_kernal.sh` |
-| **openTCS PlantOverview** | `sim_opentcs_overview.sh` | `rpi_opentcs_overview.sh` |
+### 6.4 推荐使用流程
 
-**推荐使用流程**:
-
-1. 建图阶段: 跑 `*_slam.sh` (手动遥控) 或 `*_explore.sh` (自动探索)
-2. 验证建图: `ros2 run nav2_map_server map_saver_cli -f ~/maps/my_map`
-3. 导航阶段: 跑 `*_opentcs_nav.sh /path/to/map.yaml`
-4. 调度阶段: 另开终端跑 `*_opentcs_kernal.sh` + `*_opentcs_overview.sh`
-
-**RS-485 实车** 当前仅有 `rs485_nav.sh` (等同于 `*_opentcs_nav.sh`),
-Gazebo/树莓派的 `_slam`/`_explore` 脚本可作为 RS-485 的模板参考。
+1. **建图阶段**: `./scripts/launch/slam.sh` (手动遥控) 或 `./scripts/launch/explore.sh` (自动探索)
+2. **保存地图**: `./scripts/launch/save_map.sh -f maps/my_map`
+3. **导航/调度阶段**: `./scripts/launch/dispatch.sh --map maps/my_map.yaml`
+4. **openTCS 调度**: 另开终端启动 openTCS Kernel + PlantOverview
 
 ---
 
@@ -461,7 +510,7 @@ Nav2 原生 lifecycle_manager 在 Fast-DDS (rmw_fastrtps_cpp) 下偶尔出现 se
 Ackermann 转向类似汽车，需要前进才能转弯。因此：
 - 行为树移除了 `Spin` 恢复动作，替换为 `Wait`
 - cmd_vel_bridge 在低速+有角速度时强制给予 0.05m/s 蠕行速度
-- 规划器使用 SmacPlannerHybrid (Reeds-Shepp)，支持倒车
+- 规划器使用 SmacPlannerHybrid (Dubin)，前进弧线运动模型
 
 ### 10.3 为什么树莓派不需要 cmd_vel_bridge 和 rs485_bridge?
 
@@ -473,9 +522,21 @@ STM32 负责将线速度和角速度转换为左右轮差速和前轮转角。�
 `hardware_profile` 参数在 launch 时传入，通过 `OpaqueFunction` 在运行时加载对应的
 `config/profiles/{profile}.yaml` 配置文件，决定：
 - 启动哪个硬件子 launch
+- 传感器融合方式：`sensing.type: ekf` (EKF) 或 `rf2o` (激光里程计)
 - EKF 的 frame 名称和 sensor 话题
 - lifecycle_starter_custom 管理的节点列表
 - 是否启动 cmd_vel_bridge / rs485_bridge
+
+### 10.5 三层解耦设计
+
+系统按 **应用层 × 中间层 × 硬件层** 正交解耦：
+
+- **应用层** (3个场景入口)：slam_main / explore_main / nav_main
+- **中间层** (复杂子系统)：navigation.launch.py / localization.launch.py
+- **硬件层** (4种 profile)：gazebo / rs485 / raspberry / rplidar_s2l
+
+同一场景入口通过 `hardware_profile` 参数适配不同硬件，同一硬件可跑不同场景。
+跨层服务 (watchdog + lifecycle_starter + rviz2) 在所有场景中共享。
 
 ---
 
@@ -483,23 +544,30 @@ STM32 负责将线速度和角速度转换为左右轮差速和前轮转角。�
 
 ```
 lidar-slam/
-├── launch/
-│   ├── nav_main.launch.py              ★ 统一导航入口
-│   ├── hardware/
-│   │   ├── gazebo_hardware.launch.py   ★ Gazebo 硬件层
-│   │   ├── rs485_hardware.launch.py    ★ RS-485 硬件层
-│   │   └── raspberry_hardware.launch.py★ 树莓派硬件层
-│   ├── navigation_custom.launch.py     # Nav2 子 launch
-│   ├── localization_custom.launch.py   # AMCL 子 launch
-│   ├── real_slam.launch.py             # 实车 SLAM (独立)
-│   ├── rplidar_s2l.launch.py           # RPLIDAR 驱动
-│   ├── sim_ackermann_rs485.launch.py   # 旧版统一入口 (兼容)
-│   └── sim_ackermann_*.launch.py       # 旧版仿真 launch
+├── launch/                               # ── Launch 文件 (三层架构) ──
+│   │
+│   │ ── 应用层 (场景入口) ─────────────────────────────────
+│   ├── slam_main.launch.py             ★ 场景1: 手工建图
+│   ├── explore_main.launch.py          ★ 场景2: 自动探索建图
+│   ├── nav_main.launch.py              ★ 场景3: 调度集成
+│   │
+│   │ ── 中间层 (复杂子系统) ───────────────────────────────
+│   ├── navigation.launch.py            ★ Nav2 导航栈 (10 节点)
+│   ├── localization.launch.py          ★ AMCL 定位 (map_server + AMCL)
+│   │
+│   │ ── 硬件抽象层 ──────────────────────────────────────
+│   └── hardware/
+│       ├── gazebo_hardware.launch.py   ★ Gazebo 仿真
+│       ├── rs485_hardware.launch.py    ★ RS-485 实车
+│       ├── raspberry_hardware.launch.py★ 树莓派小车
+│       └── rplidar_s2l_hardware.launch.py★ 纯激光雷达 (无底盘)
+│
 ├── config/
-│   ├── profiles/
-│   │   ├── gazebo.yaml                 ★ Gazebo 硬件参数
-│   │   ├── rs485.yaml                  ★ RS-485 硬件参数
-│   │   └── raspberry.yaml              ★ 树莓派硬件参数
+│   ├── profiles/                        # 硬件 Profile 配置
+│   │   ├── gazebo.yaml                 ★ Gazebo (sensing: ekf)
+│   │   ├── rs485.yaml                  ★ RS-485 (sensing: ekf)
+│   │   ├── raspberry.yaml              ★ 树莓派 (sensing: ekf)
+│   │   └── rplidar_s2l.yaml            ★ 纯雷达 (sensing: rf2o)
 │   ├── ekf.yaml                        # EKF 传感器融合
 │   ├── nav2_params_opentcs.yaml        # Nav2 参数 (openTCS 模式)
 │   ├── nav2_params_exploration.yaml    # Nav2 参数 (探索模式)
@@ -508,31 +576,28 @@ lidar-slam/
 │   ├── opentcs_vehicle.yaml            # openTCS 车辆配置
 │   ├── watchdog.yaml                   # 系统监控配置
 │   └── material_action.yaml            # 物料操作配置
+│
 ├── scripts/
-│   ├── launch/
-│   │   ├── ────────── Gazebo 场景 ──────────
-│   │   ├── sim_slam.sh              ★ Gazebo SLAM 建图
-│   │   ├── sim_explore.sh           ★ Gazebo 自动探索建图
-│   │   ├── sim_opentcs_nav.sh       ★ Gazebo openTCS 导航
-│   │   ├── sim_opentcs_kernal.sh    ★ openTCS Kernel (Gazebo)
-│   │   ├── sim_opentcs_overview.sh  ★ openTCS PlantOverview (Gazebo)
-│   │   ├── ────────── 树莓派场景 ──────────
-│   │   ├── rpi_slam.sh           ★ 树莓派 SLAM 建图
-│   │   ├── rpi_explore.sh        ★ 树莓派自动探索建图
-│   │   ├── rpi_opentcs_nav.sh    ★ 树莓派 openTCS 导航
-│   │   ├── rpi_opentcs_kernal.sh ★ openTCS Kernel (树莓派)
-│   │   ├── rpi_opentcs_overview.sh★ openTCS PlantOverview (树莓派)
-│   │   ├── ────────── RS-485 / 旧版 ──────────
-│   │   ├── rs485_nav.sh                ★ RS-485 启动脚本
-│   │   ├── rpi_opentcs.sh        ★ 树莓派旧版 (兼容)
-│   │   ├── sim_ackermann_rs485.sh      # 仿真启动 (当前主场景)
-│   │   └── ...其他启动脚本
+│   ├── launch/                          # ── 统一启动脚本 ──
+│   │   ├── slam.sh                     ★ 手工建图 (--profile 选择硬件)
+│   │   ├── explore.sh                  ★ 自动探索建图
+│   │   ├── dispatch.sh                 ★ 调度集成
+│   │   ├── save_map.sh                 ★ 保存地图
+│   │   ├── teleop.sh                   ★ 键盘遥控 (独立终端)
+│   │   ├── view_tf_tree.sh             # TF 树查看
+│   │   └── rplidar_s2_view.sh          # RPLIDAR 驱动+可视化
 │   ├── tools/
 │   │   ├── cleanup_ros2.sh             # 清理残留进程
-│   │   └── diagnose_ackermann.sh       # 诊断工具
+│   │   ├── diagnose_ackermann.sh       # 诊断工具
+│   │   ├── map_to_sdf.py               # 地图转 Gazebo SDF
+│   │   └── sim_sidecar_goal.py         # 模拟 openTCS Sidecar
+│   ├── check/
+│   │   ├── sim_check.sh                # 仿真环境预检
+│   │   └── diagnose_inflation.py       # Nav2 InflationLayer 诊断
 │   └── deploy_remote.py                # 远程部署工具
-├── src/
-│   ├── lidar_slam_nodes/               # 自定义 Python 节点包
+│
+├── src/                                 # ── 源代码 ──
+│   ├── lidar_slam_nodes/               # 自定义 Python 节点包 (16 节点)
 │   │   └── lidar_slam_nodes/
 │   │       ├── cmd_vel_bridge.py
 │   │       ├── rs485_chassis_bridge.py
@@ -555,6 +620,7 @@ lidar-slam/
 │   ├── jvs_agv_material_msgs/          # 物料操作消息接口
 │   ├── explore_lite → third-party/     # 自主探索 (符号链接)
 │   └── explore_lite_msgs → third-party/
+│
 ├── third-party/                        # Git 子模块
 │   ├── slam_toolbox/                   # SLAM 工具箱 (fork)
 │   ├── m-explore-ros2/                 # 自主探索
@@ -562,6 +628,7 @@ lidar-slam/
 │   ├── rplidar_sdk/                    # RPLIDAR SDK
 │   ├── openTCS-NeNa/                   # openTCS 车队调度
 │   └── aws-robomaker-small-warehouse-world/ # Gazebo 仿真世界
+│
 ├── behavior_trees/
 │   └── ackermann_nav.xml               # Ackermann 定制行为树
 ├── models/
@@ -587,8 +654,14 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 # 编译
 colcon build --symlink-install
 
-# 启动仿真导航
-ros2 launch nav_main.launch.py hardware_profile:=gazebo
+# 手工建图 (仿真)
+./scripts/launch/slam.sh
+
+# 自动探索 (仿真)
+./scripts/launch/explore.sh
+
+# 调度集成 (仿真)
+./scripts/launch/dispatch.sh --map maps/my_map.yaml
 ```
 
 ### 12.2 树莓派小车 (10.0.0.205)
@@ -602,8 +675,11 @@ cd /home/pi/jvs
 source /opt/ros/jazzy/setup.bash
 colcon build --symlink-install --parallel-workers 3
 
-# 启动导航
-bash scripts/launch/rpi_opentcs.sh [地图文件]
+# 手工建图 (树莓派)
+./scripts/launch/slam.sh --profile raspberry
+
+# 调度集成 (树莓派)
+./scripts/launch/dispatch.sh --profile raspberry --map maps/my_map.yaml
 
 # 环境变量已在 ~/.bashrc 中配置:
 #   LIDAR_SLAM_ROOT=/home/pi/jvs
@@ -618,8 +694,18 @@ bash scripts/launch/rpi_opentcs.sh [地图文件]
 # 确认串口设备存在
 ls /dev/ttyUSB0 /dev/ttyUSB1
 
-# 启动导航
-bash scripts/launch/rs485_nav.sh [地图文件]
+# 调度集成 (RS-485)
+./scripts/launch/dispatch.sh --profile rs485 --map maps/my_map.yaml
+```
+
+### 12.4 纯激光雷达建图
+
+```bash
+# 手持建图 (笔记本 + RPLIDAR S2L)
+./scripts/launch/slam.sh --profile rplidar_s2l
+
+# 保存地图
+./scripts/launch/save_map.sh -f maps/handheld_map
 ```
 
 ---

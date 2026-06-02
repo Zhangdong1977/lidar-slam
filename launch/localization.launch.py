@@ -1,8 +1,11 @@
-"""Custom localization launch with proper lifecycle_manager configuration.
+"""Localization sub-launch: AMCL + map_server + lifecycle_manager.
 
+Layer: Middleware (Localization)
 Based on nav2_bringup/localization_launch.py (ROS2 Jazzy).
 Changes: lifecycle_manager receives configured_params including service_call_timeout,
 so it can survive transient Fast-DDS RMW timeouts under heavy system load.
+
+Used by: nav_main.launch.py (dispatch scenario)
 """
 
 import os
