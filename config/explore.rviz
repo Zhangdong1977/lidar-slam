@@ -43,7 +43,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /map
+        Value: map
       Use Timestamp: false
       Value: true
     - Alpha: 0.5
@@ -57,7 +57,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /global_costmap/costmap
+        Value: global_costmap/costmap
       Use Timestamp: false
       Value: true
     - Alpha: 0.5
@@ -71,7 +71,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /local_costmap/costmap
+        Value: local_costmap/costmap
       Use Timestamp: false
       Value: true
     - Alpha: 1
@@ -99,7 +99,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /plan
+        Value: plan
       Value: true
     - Class: rviz_default_plugins/LaserScan
       Color: 255; 0; 0
@@ -116,7 +116,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /scan
+        Value: scan
       Use Fixed Frame: true
       Value: true
     - Class: rviz_default_plugins/TF
@@ -137,7 +137,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /frontier_markers
+        Value: frontier_markers
       Value: true
   Enabled: true
   Global Options:
@@ -153,7 +153,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /ackermann_robot/goal_pose
+        Value: goal_pose
   Transformation:
     Current:
       Class: rviz_default_plugins/TF

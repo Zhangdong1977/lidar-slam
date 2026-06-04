@@ -11,6 +11,7 @@ log/
 # Third-party workspaces (build artifacts)
 third-party/rplidar_ws/
 third-party/src/
+third-party/
 
 # Python cache
 __pycache__/

@@ -33,6 +33,9 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration('use_respawn')
     log_level = LaunchConfiguration('log_level')
     vehicle_name = LaunchConfiguration('vehicle_name')
+    initial_pose_x = LaunchConfiguration('initial_pose_x')
+    initial_pose_y = LaunchConfiguration('initial_pose_y')
+    initial_pose_yaw = LaunchConfiguration('initial_pose_yaw')
 
     lifecycle_nodes = ['map_server', 'amcl']
 
@@ -42,7 +45,12 @@ def generate_launch_description():
         RewrittenYaml(
             source_file=params_file,
             root_key=namespace,
-            param_rewrites={'autostart': autostart},
+            param_rewrites={
+                'autostart': autostart,
+                'amcl.ros__parameters.initial_pose.x': initial_pose_x,
+                'amcl.ros__parameters.initial_pose.y': initial_pose_y,
+                'amcl.ros__parameters.initial_pose.yaw': initial_pose_yaw,
+            },
             convert_types=True,
         ),
         allow_substs=True,
@@ -127,5 +135,8 @@ def generate_launch_description():
         DeclareLaunchArgument('use_respawn', default_value='False'),
         DeclareLaunchArgument('log_level', default_value='info'),
         DeclareLaunchArgument('vehicle_name', default_value='ackermann_robot'),
+        DeclareLaunchArgument('initial_pose_x', default_value='0.0'),
+        DeclareLaunchArgument('initial_pose_y', default_value='0.0'),
+        DeclareLaunchArgument('initial_pose_yaw', default_value='0.0'),
         load_nodes,
     ])

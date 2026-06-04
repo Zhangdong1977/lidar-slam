@@ -14,6 +14,7 @@ chassis:
 sensors:
   lidar:
     type: "gazebo_bridge"
+    # frame is dynamically constructed in launch as: {gazebo_model_name}/body_link/lidar
     frame: "ackermann_robot/body_link/lidar"
     serial_port: ""
     baudrate: 0
@@ -27,6 +28,7 @@ sensors:
 frames:
   base_frame: "body_link"
   odom_frame: "odom"
+  # lidar_frame is dynamically constructed in launch as: {gazebo_model_name}/body_link/lidar
   lidar_frame: "ackermann_robot/body_link/lidar"
 
 sensing:

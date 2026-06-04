@@ -36,10 +36,12 @@ class WaitForService(Node):
         self.declare_parameter('service_name', '')
         self.declare_parameter('service_type', '')
         self.declare_parameter('timeout', 60.0)
+        self.declare_parameter('exit_on_timeout', True)
 
         service_name = self.get_parameter('service_name').value
         service_type_str = self.get_parameter('service_type').value
         timeout = self.get_parameter('timeout').value
+        exit_on_timeout = self.get_parameter('exit_on_timeout').value
 
         if not service_name or not service_type_str:
             self.get_logger().error(
@@ -59,16 +61,21 @@ class WaitForService(Node):
 
         cli = self.create_client(srv_type, service_name)
 
-        if cli.wait_for_service(timeout_sec=timeout):
-            self.get_logger().info(f'Service {service_name} is ready')
-            cli.destroy()
-            sys.exit(0)
-        else:
+        while rclpy.ok():
+            if cli.wait_for_service(timeout_sec=timeout):
+                self.get_logger().info(f'Service {service_name} is ready')
+                cli.destroy()
+                sys.exit(0)
+
             self.get_logger().error(
                 f'Timeout waiting for service {service_name} ({timeout}s)'
             )
-            cli.destroy()
-            sys.exit(1)
+            if exit_on_timeout:
+                cli.destroy()
+                sys.exit(1)
+
+        cli.destroy()
+        sys.exit(1)
 
 
 def main():

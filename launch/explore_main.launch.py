@@ -80,7 +80,7 @@ def generate_launch_description():
         description='Launch RViz2 for visualization')
     namespace_arg = DeclareLaunchArgument(
         'namespace', default_value='',
-        description='Robot namespace for multi-vehicle support (e.g. c30_1)')
+        description='Vehicle name (ROS2 namespace and Gazebo spawn name)')
 
     def launch_setup(context):
         profile = LaunchConfiguration('hardware_profile').perform(context)

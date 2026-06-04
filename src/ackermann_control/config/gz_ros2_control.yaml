@@ -1,4 +1,4 @@
-controller_manager:
+/**/controller_manager:
   ros__parameters:
     update_rate: 100
 
@@ -11,7 +11,7 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-forward_position_controller:
+/**/forward_position_controller:
   ros__parameters:
     joints:
       - front_left_steering_joint
@@ -23,7 +23,7 @@ forward_position_controller:
       - position
       - velocity
 
-forward_velocity_controller:
+/**/forward_velocity_controller:
   ros__parameters:
     joints:
       - rear_left_wheel_joint

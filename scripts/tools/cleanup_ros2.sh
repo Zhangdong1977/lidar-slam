@@ -198,7 +198,7 @@ echo -n "Cleaning ROS2 temp files... "
 rm -f /tmp/ros2_daemon_* 2>/dev/null || true
 rm -rf /tmp/.ros/ 2>/dev/null || true
 # RS-485 virtual serial port leftovers
-rm -f /tmp/chassis_cmd /tmp/chassis_recv 2>/dev/null || true
+rm -f /tmp/chassis_cmd /tmp/chassis_recv /tmp/*_chassis_cmd /tmp/*_chassis_recv 2>/dev/null || true
 echo "done"
 
 # ── Fast-DDS shared memory (file-based, ROS2 Humble+) ─────────────

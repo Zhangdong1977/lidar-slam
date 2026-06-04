@@ -10,7 +10,7 @@
 #   ./scripts/launch/rviz_remote.sh --domain-id 30
 #   ./scripts/launch/rviz_remote.sh --config /path/to/slam.rviz
 #   ./scripts/launch/rviz_remote.sh --profile raspberry    # 自动从 profile 读取 domain_id
-#   ./scripts/launch/rviz_remote.sh --config config/nav.rviz  # 导航可视化
+#   ./scripts/launch/rviz_remote.sh --config config/nav_multi.rviz  # 多车导航可视化
 # ─────────────────────────────────────────────────────────────────────
 
 set -e

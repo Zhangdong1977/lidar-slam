@@ -108,10 +108,10 @@ LOG_FILE="${LOG_DIR}/explore_${PROFILE}_$(date +%Y-%m-%d_%H-%M-%S).log"
 
 echo "============================================="
 echo "  自动探索建图场景"
-echo "  Profile: $PROFILE"
-echo "  Namespace: ${NAMESPACE:-无}"
-echo "  RViz:    $USE_RVIZ"
-echo "  日志:    ${LOG_FILE}"
+echo "  Profile:     $PROFILE"
+echo "  Namespace:   ${NAMESPACE:-无}"
+echo "  RViz:        $USE_RVIZ"
+echo "  日志:        ${LOG_FILE}"
 echo "============================================="
 
 # ── 清理残留 ──────────────────────────────────────────────────────

@@ -19,11 +19,13 @@ class WaitForTopic(Node):
         self.declare_parameter('min_publishers', 1)
         self.declare_parameter('timeout', 60.0)
         self.declare_parameter('check_period', 0.5)
+        self.declare_parameter('exit_on_timeout', True)
 
         self._topic_name = self.get_parameter('topic_name').value
         self._min_publishers = self.get_parameter('min_publishers').value
         timeout = self.get_parameter('timeout').value
         period = self.get_parameter('check_period').value
+        exit_on_timeout = self.get_parameter('exit_on_timeout').value
 
         if not self._topic_name:
             self.get_logger().error('topic_name parameter is required')
@@ -51,7 +53,9 @@ class WaitForTopic(Node):
                     f'Timeout waiting for topic {self._topic_name} '
                     f'({info}/{self._min_publishers} publishers after {timeout}s)'
                 )
-                sys.exit(1)
+                if exit_on_timeout:
+                    sys.exit(1)
+                deadline = time.monotonic() + timeout
 
             rclpy.spin_once(self, timeout_sec=period)
 

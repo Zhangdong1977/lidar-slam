@@ -198,6 +198,13 @@ class LifecycleStarter(Node):
         get_client = clients['get_state']
 
         for attempt in range(1, self._max_retries + 1):
+            current_state = self._get_node_state(node_name, get_client)
+            if self._transition_satisfied(transition_id, current_state):
+                self.get_logger().info(
+                    f'[{node_name}] {transition_name.capitalize()} already '
+                    f'satisfied (state={self._state_label(current_state)})')
+                return True
+
             # Wait for service availability
             if not change_client.wait_for_service(timeout_sec=10.0):
                 self.get_logger().warn(
@@ -226,6 +233,13 @@ class LifecycleStarter(Node):
                 rclpy.spin_once(self, timeout_sec=0.5)
 
             if not future.done():
+                current_state = self._get_node_state(node_name, get_client)
+                if self._transition_satisfied(transition_id, current_state):
+                    self.get_logger().info(
+                        f'[{node_name}] {transition_name.capitalize()}d '
+                        f'(state={self._state_label(current_state)})')
+                    return True
+
                 self.get_logger().warn(
                     f'[{node_name}] {transition_name}: TIMEOUT after {timeout}s, '
                     f'retry {attempt}/{self._max_retries}')
@@ -241,6 +255,13 @@ class LifecycleStarter(Node):
             try:
                 response = future.result()
             except Exception as e:
+                current_state = self._get_node_state(node_name, get_client)
+                if self._transition_satisfied(transition_id, current_state):
+                    self.get_logger().info(
+                        f'[{node_name}] {transition_name.capitalize()}d '
+                        f'(state={self._state_label(current_state)})')
+                    return True
+
                 self.get_logger().warn(
                     f'[{node_name}] {transition_name}: exception: {e}, '
                     f'retry {attempt}/{self._max_retries}')
@@ -249,6 +270,13 @@ class LifecycleStarter(Node):
                 continue
 
             if not response.success:
+                current_state = self._get_node_state(node_name, get_client)
+                if self._transition_satisfied(transition_id, current_state):
+                    self.get_logger().info(
+                        f'[{node_name}] {transition_name.capitalize()}d '
+                        f'(state={self._state_label(current_state)})')
+                    return True
+
                 self.get_logger().warn(
                     f'[{node_name}] {transition_name}: failed, '
                     f'retry {attempt}/{self._max_retries}')
@@ -266,6 +294,16 @@ class LifecycleStarter(Node):
 
         self.get_logger().error(
             f'[{node_name}] {transition_name}: FAILED after {self._max_retries} retries')
+        return False
+
+    @staticmethod
+    def _transition_satisfied(transition_id, state_id):
+        if state_id is None:
+            return False
+        if transition_id == TRANSITION_CONFIGURE:
+            return state_id in (STATE_INACTIVE, STATE_ACTIVE)
+        if transition_id == TRANSITION_ACTIVATE:
+            return state_id == STATE_ACTIVE
         return False
 
     def _get_node_state(self, node_name, get_client=None):

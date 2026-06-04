@@ -130,11 +130,11 @@ LOG_FILE="${LOG_DIR}/slam_${PROFILE}_$(date +%Y-%m-%d_%H-%M-%S).log"
 
 echo "============================================="
 echo "  手工建图场景"
-echo "  Profile: $PROFILE"
-echo "  Namespace: ${NAMESPACE:-无}"
-echo "  Teleop:   $USE_TELEOP"
-echo "  Joystick: $USE_JOYSTICK"
-echo "  RViz:     $USE_RVIZ"
+echo "  Profile:     $PROFILE"
+echo "  Namespace:   ${NAMESPACE:-无}"
+echo "  Teleop:      $USE_TELEOP"
+echo "  Joystick:    $USE_JOYSTICK"
+echo "  RViz:        $USE_RVIZ"
 if [ -n "$SLAM_PARAMS" ]; then
     echo "  SLAM参数: $SLAM_PARAMS"
 fi

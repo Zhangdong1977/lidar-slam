@@ -11,6 +11,10 @@ def main():
     rclpy.init()
     node = rclpy.create_node('load_controllers_client')
 
+    # Accept gazebo_model_name parameter for multi-vehicle support
+    node.declare_parameter('gazebo_model_name', 'ackermann_robot')
+    gazebo_model_name = node.get_parameter('gazebo_model_name').value
+
     controllers = [
         'joint_state_broadcaster',
         'forward_position_controller',
@@ -19,15 +23,15 @@ def main():
 
     # Discover controller_manager service.
     # Search order:
-    #   1. Relative name – resolves under node namespace (PushRosNamespace)
-    #   2. Gazebo model namespace – /ackermann_robot/controller_manager
+    #   1. Gazebo model namespace – /{gazebo_model_name}/controller_manager
+    #   2. Relative name – resolves under node namespace (PushRosNamespace)
     #   3. Root – /controller_manager (legacy fallback)
     load_srv = None
     config_srv = None
     switch_srv = None
 
-    for base in ['controller_manager',
-                 '/ackermann_robot/controller_manager',
+    for base in [f'/{gazebo_model_name}/controller_manager',
+                 'controller_manager',
                  '/controller_manager']:
         load_name = f'{base}/load_controller'
         config_name = f'{base}/configure_controller'

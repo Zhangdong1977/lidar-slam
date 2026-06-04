@@ -84,7 +84,7 @@ def generate_launch_description():
         description='Enable automatic respawn of crashed nodes')
     namespace_arg = DeclareLaunchArgument(
         'namespace', default_value='',
-        description='Robot namespace for multi-vehicle support (e.g. c30_1)')
+        description='Vehicle name (ROS2 namespace and Gazebo spawn name)')
 
     def launch_setup(context):
         profile = LaunchConfiguration('hardware_profile').perform(context)
@@ -219,6 +219,7 @@ def generate_launch_description():
         wait_scan = Node(
             package='lidar_slam_nodes',
             executable='wait_for_topic',
+            name='wait_scan',
             output='screen',
             parameters=[{
                 'topic_name': 'scan',
@@ -300,6 +301,7 @@ def generate_launch_description():
         wait_odom_tf = Node(
             package='lidar_slam_nodes',
             executable='wait_for_tf',
+            name='wait_odom_tf',
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
