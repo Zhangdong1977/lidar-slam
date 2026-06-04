@@ -1,6 +1,13 @@
 <?xml version="1.0"?>
 <robot name="ackermann_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+  <!-- Namespace for gz_ros2_control controller_manager (empty = root NS, backward compatible) -->
+  <xacro:arg name="gz_ros2_control_ns" default=""/>
+  <!-- Gazebo model name for model-scoped topic paths (matches spawn -name) -->
+  <xacro:arg name="gz_model_name" default="ackermann_robot"/>
+  <!-- Topic used by gz_ros2_control to receive this model's URDF. -->
+  <xacro:arg name="robot_description_topic" default="/robot_description"/>
+
   <!-- BX-S40 Parameters -->
   <xacro:property name="body_length" value="0.9"/>
   <xacro:property name="body_width" value="0.6"/>
@@ -389,6 +396,10 @@
 
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
       <parameters>$(find ackermann_control)/config/gz_ros2_control.yaml</parameters>
+      <ros>
+        <namespace>$(arg gz_ros2_control_ns)</namespace>
+        <remapping>robot_description:=$(arg robot_description_topic)</remapping>
+      </ros>
     </plugin>
 
     <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
@@ -397,7 +408,7 @@
     <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
       <odom_frame>odom</odom_frame>
       <robot_base_frame>body_link</robot_base_frame>
-      <odom_topic>/odom</odom_topic>
+      <odom_topic>/model/$(arg gz_model_name)/odom</odom_topic>
       <dimensions>3</dimensions>
       <publish_tf>false</publish_tf>
     </plugin>
@@ -409,7 +420,7 @@
   <gazebo reference="body_link">
     <sensor name="lidar" type="gpu_lidar">
       <pose>0 0 0.22 0 0 0</pose>
-      <topic>/scan_raw</topic>
+      <topic>/model/$(arg gz_model_name)/scan_raw</topic>
       <update_rate>10</update_rate>
       <lidar>
         <scan>
@@ -433,7 +444,7 @@
       <always_on>1</always_on>
       <update_rate>100</update_rate>
       <visualize>true</visualize>
-      <topic>/imu</topic>
+      <topic>/model/$(arg gz_model_name)/imu</topic>
       <imu>
         <angular_velocity>
           <x><noise type="gaussian"><mean>0.0</mean><stddev>0.00017</stddev></noise></x>

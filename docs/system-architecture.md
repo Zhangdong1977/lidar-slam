@@ -50,9 +50,9 @@ JVS-AGV 是一套基于 ROS2 Jazzy 的阿克曼（Ackermann）转向 AGV 导航�
 ```
 开发端 (domain 42)              生产端 (domain 30)
 ┌─────────────────┐            ┌─────────────────────┐
-│  Gazebo 仿真     │            │  Pi 小车 × N        │
-│  /scan, /odom... │            │  /c30_1/scan, etc.  │
-│  namespace: ''   │            │  namespace: c30_1   │
+│  Gazebo 仿真 × N │            │  Pi 小车 × N        │
+│  /gazebo_1/scan  │            │  /c30_1/scan, etc.  │
+│  namespace: gazebo_1 │        │  namespace: c30_1   │
 └─────────────────┘            └─────────────────────┘
      互不可见 (DDS 层面隔离)
 ```
@@ -69,6 +69,8 @@ JVS-AGV 是一套基于 ROS2 Jazzy 的阿克曼（Ackermann）转向 AGV 导航�
 - 所有话题名使用**相对路径**（如 `scan` 而非 `/scan`）
 - `PushRosNamespace('c30_1')` 将相对话题解析为 `/c30_1/scan`
 - TF 话题通过 remapping `('/tf', 'tf')` 隔离到 `/c30_1/tf`
+- Gazebo `robot_description` 按车辆隔离到 `/<namespace>/robot_description`
+- Gazebo `/clock` 是全局仿真时钟，只由启动 Gazebo 的 bridge 发布；复用 Gazebo 的车辆使用 `--no-gazebo`
 - `namespace=''`（默认）时，`PushRosNamespace('')` 为 no-op → 向后兼容单车
 
 **第三方节点**（`rplidar_node`, `car_base_node`）通过 launch 中的**防御性 remappings** 确保话题被 namespace：
@@ -87,6 +89,7 @@ car_base = Node(
 
 **Sidecar 话题**（openTCS 通信）保持绝对路径，通过 `vehicle_name` 参数构造前缀：
 - `/{vehicle_name}/amcl_pose`、`/{vehicle_name}/goal_pose` 等
+- `/{vehicle_name}/route_graph_json` 用于下发 GeoJSON 路线图，避免与 Nav2 `route_graph` MarkerArray 撞名
 - 多车时将 `vehicle_name` 设为 namespace 值（如 `c30_1`）
 
 ### 2.3 完整架构图
@@ -95,10 +98,10 @@ car_base = Node(
 开发端 (domain 42)                   生产端 (domain 30)
 ┌──────────────────────┐     ┌───────────────────┬───────────────────┐
 │  Gazebo 仿真          │     │  Pi C30_1         │  Pi C30_2         │
-│  namespace: ''        │     │  namespace: c30_1 │  namespace: c30_2 │
-│  /scan, /odom         │     │  /c30_1/scan      │  /c30_2/scan      │
-│  /cmd_vel             │     │  /c30_1/cmd_vel   │  /c30_2/cmd_vel   │
-│  /tf                  │     │  /c30_1/tf        │  /c30_2/tf        │
+│  namespace: gazebo_1  │     │  namespace: c30_1 │  namespace: c30_2 │
+│  /gazebo_1/scan       │     │  /c30_1/scan      │  /c30_2/scan      │
+│  /gazebo_1/cmd_vel    │     │  /c30_1/cmd_vel   │  /c30_2/cmd_vel   │
+│  /gazebo_1/tf         │     │  /c30_1/tf        │  /c30_2/tf        │
 └──────────────────────┘     └───────────────────┴───────────────────┘
                              ┌───────────────────────────────────────┐
                              │  openTCS Sidecar (dev/server)         │
@@ -246,7 +249,7 @@ vehicle:                            # 车辆参数
 | **里程计来源** | Gazebo 仿真 → odom | car_base_node → odom | car_base_node → odom | 无 (rf2o 激光里程计) |
 | **传感器融合** | EKF | EKF | EKF | rf2o |
 | **base_frame** | body_link | base_link | base_link | base_link |
-| **雷达 frame** | ackermann_robot/body_link/lidar | laser | lidar_link | laser |
+| **雷达 frame** | `<namespace>/body_link/lidar` | laser | lidar_link | laser |
 | **use_sim_time** | true | false | false | false |
 | **轴距** | 0.58m | 0.58m | 0.175m | — |
 | **最大转向角** | 30° (0.5236 rad) | 30° (0.5236 rad) | 45° (0.785 rad) | — |
@@ -265,7 +268,7 @@ vehicle:                            # 车辆参数
 | `rs485_chassis_receiver` | LifecycleNode | 解码 RS-485 帧，发布 rs485/steering_angle + rs485/velocity | gazebo only |
 | `frontier_explorer` | LifecycleNode | 前端探索决策，多目标评分（距离+航向+尺寸），黑名单机制，卡住检测 | all |
 | `opentcs_vehicle_node` | LifecycleNode | openTCS Sidecar 桥接，10Hz 位姿上报，航向对齐状态机，障碍物检测；所有话题已参数化，支持 namespace | all |
-| `route_graph_loader` | LifecycleNode | 加载 GeoJSON 路线图到 route_server；话题已参数化 | all |
+| `route_graph_loader` | LifecycleNode | 订阅 `route_graph_json`，加载 GeoJSON 路线图到 route_server；Marker 发布到 `route_graph/markers` | all |
 | `lifecycle_starter` | Node | 替代 Nav2 lifecycle_manager，支持超时+重试+两轮启动 | all |
 | `node_watchdog` | Node | 监控关键节点/话题健康，发布 system_health (DiagnosticArray)；话题名由 watchdog.yaml 配置 | all |
 | `battery_bridge` | Node | PowerVoltage (Float32) → battery_state (BatteryState)，电压→百分比 | raspberry |
@@ -317,7 +320,8 @@ vehicle:                            # 车辆参数
 | `system_health` | diagnostic_msgs/DiagnosticArray | node_watchdog | rqt_robot_monitor |
 | `PowerVoltage` | std_msgs/Float32 | car_base_node (STM32) | battery_bridge |
 | `joint_states` | sensor_msgs/JointState | car_base_node 或 Gazebo | robot_state_publisher |
-| `route_graph` | std_msgs/String (JSON) | 外部 (openTCS Sidecar) | route_graph_loader |
+| `route_graph_json` | std_msgs/String (JSON) | 外部 (openTCS Sidecar) | route_graph_loader |
+| `route_graph` | visualization_msgs/MarkerArray | Nav2 route_server | rviz2 |
 | `route_graph/markers` | visualization_msgs/MarkerArray | route_graph_loader | rviz2 |
 | `system_health_summary` | std_msgs/String | node_watchdog | 调试用 |
 
@@ -329,6 +333,7 @@ vehicle:                            # 车辆参数
 | `/{vehicle_name}/goal_pose` | PoseStamped | 订阅 (Sidecar → opentcs_vehicle) |
 | `/{vehicle_name}/robot_state` | String | 发布 (opentcs_vehicle → Sidecar) |
 | `/{vehicle_name}/battery_state` | BatteryState | 发布 (opentcs_vehicle → Sidecar) |
+| `/{vehicle_name}/route_graph_json` | String (GeoJSON) | 订阅 (Sidecar → route_graph_loader) |
 
 ### 6.2 TF 变换树
 
@@ -346,7 +351,7 @@ gazebo profile:                      rs485 / raspberry profile:
   body_link                            base_link
    │ (static TF)                        │ (static TF)
    ▼                                    ▼
-  ackermann_robot/body_link/lidar      laser 或 lidar_link
+  <namespace>/body_link/lidar          laser 或 lidar_link
 ```
 
 Frame ID 在各 namespace 的 TF 树内保持不变，通过 TF 话题隔离互不冲突。
@@ -467,7 +472,7 @@ GroupAction(PushRosNamespace(namespace))  ← 所有节点在 namespace 内
 │       │                                                       │
 │       ▼ wait_for_service(route_server/set_route_graph)        │
 │ [路线 + 物料]                                                  │
-│   ├ route_graph_loader (话题参数化)                            │
+│   ├ route_graph_loader (订阅 route_graph_json, 话题参数化)       │
 │   └ material_action_gui (5s 延迟)                             │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -566,7 +571,7 @@ IMU: STM32 内部 Mahony 互补滤波, 50Hz
 | `map` | — | 全局固定坐标系 (世界) |
 | `odom` | EKF | 里程计坐标系 (平滑漂移) |
 | `body_link` / `base_link` | EKF | 机器人底盘中心 |
-| `ackermann_robot/body_link/lidar` / `laser` / `lidar_link` | static TF | 激光雷达安装位置 |
+| `<namespace>/body_link/lidar` / `laser` / `lidar_link` | static TF | 激光雷达安装位置 |
 | `imu_link` | static TF / URDF | IMU 传感器 |
 | `front_*_steering_link` | robot_state_publisher | 前轮转向关节 |
 | `*_wheel_link` | robot_state_publisher | 车轮 |
@@ -655,6 +660,8 @@ STM32 负责将线速度和角速度转换为左右轮差速和前轮转角。�
 - 所有 YAML 和节点中的话题名使用**相对路径**，namespace 由 `PushRosNamespace` 在 launch 时注入
 - 第三方不可修改的节点（`rplidar_node`, `car_base_node`）通过**防御性 remappings** 将绝对话题转为相对
 - TF 话题通过 `('/tf', 'tf')` remapping 隔离到 `/<namespace>/tf`
+- Gazebo `robot_description` 使用 `/<namespace>/robot_description`，避免多车 controller_manager 订阅同一 URDF
+- Gazebo `/clock` 保持全局单发布者；`--no-gazebo` 的车辆不桥接 `/clock`
 - openTCS Sidecar 话题保持**绝对路径**，通过 `vehicle_name` 参数构造前缀
 - `namespace=''`（默认）时所有隔离机制为 no-op → 完全向后兼容单车模式
 
@@ -866,6 +873,13 @@ ros2 lifecycle list /c30_1/cmd_vel_bridge
 
 # 验证 namespace 隔离
 ros2 topic list | grep c30_1   # 应看到 /c30_1/scan, /c30_1/odom 等
+
+# 验证 Gazebo 多车无同名异类型 topic
+ros2 topic list -t | awk -F'[][]' 'NF>=3 && $2 ~ /,/ {print}'
+
+# 验证 robot_description 和 clock 隔离
+ros2 topic info /gazebo_1/robot_description -v
+ros2 topic info /clock -v       # 应只有一个 ros_gz_bridge publisher
 
 # 验证 domain 隔离 (domain 42 不应看到 domain 30 的话题)
 ros2 topic list                 # 应无 Pi 发布的话题

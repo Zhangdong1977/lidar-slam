@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load route graph from Sidecar-published topic into Nav2 route_server.
 
-Subscribes to /route_graph (std_msgs/String, Transient Local QoS).
+Subscribes to route_graph_json (std_msgs/String, Transient Local QoS).
 On receiving a GeoJSON string, saves it to a file and calls
 route_server's SetRouteGraph service to load it.
 """
@@ -47,10 +47,11 @@ class RouteGraphLoader(LifecycleNode):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self.declare_parameter('route_graph_topic', 'route_graph')
+        self.declare_parameter('route_graph_topic', 'route_graph_json')
         self.declare_parameter('route_graph_markers_topic', 'route_graph/markers')
         graph_topic = self.get_parameter('route_graph_topic').value
         markers_topic = self.get_parameter('route_graph_markers_topic').value
+        self._graph_topic = graph_topic
 
         self._sub = self.create_subscription(
             String, graph_topic, self._on_graph, qos)
@@ -95,14 +96,16 @@ class RouteGraphLoader(LifecycleNode):
     def _on_graph(self, msg: String):
         geojson_str = msg.data.strip()
         if not geojson_str:
-            self.get_logger().warn('Received empty /route_graph message, ignoring')
+            self.get_logger().warn(
+                f'Received empty {self._graph_topic} message, ignoring')
             return
 
         # Validate JSON structure
         try:
             obj = json.loads(geojson_str)
         except json.JSONDecodeError as e:
-            self.get_logger().error(f'Invalid JSON in /route_graph: {e}')
+            self.get_logger().error(
+                f'Invalid JSON in {self._graph_topic}: {e}')
             return
 
         if obj.get('type') != 'FeatureCollection':

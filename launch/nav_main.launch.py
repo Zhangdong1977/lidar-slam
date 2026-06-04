@@ -50,6 +50,16 @@ def load_profile_yaml(profile_name_str, project_dir):
     return {}
 
 
+def load_node_params_yaml(path, node_name):
+    """Load ros__parameters for a node from a ROS2 parameter YAML file."""
+    import yaml
+    if not os.path.exists(path):
+        return {}
+    with open(path, 'r') as f:
+        data = yaml.safe_load(f) or {}
+    return data.get(node_name, {}).get('ros__parameters', {})
+
+
 def generate_launch_description():
     project_dir = os.environ.get('LIDAR_SLAM_ROOT', '/home/hello/lidar-slam')
 
@@ -69,10 +79,31 @@ def generate_launch_description():
         description='Vehicle name for openTCS identification')
     namespace_arg = DeclareLaunchArgument(
         'namespace', default_value='',
-        description='ROS2 namespace for multi-vehicle support')
+        description='Vehicle name (ROS2 namespace and Gazebo spawn name)')
+    spawn_x_arg = DeclareLaunchArgument(
+        'spawn_x', default_value='0',
+        description='Gazebo spawn X position')
+    spawn_y_arg = DeclareLaunchArgument(
+        'spawn_y', default_value='0',
+        description='Gazebo spawn Y position')
+    spawn_z_arg = DeclareLaunchArgument(
+        'spawn_z', default_value='0.24',
+        description='Gazebo spawn Z position')
+    initial_pose_x_arg = DeclareLaunchArgument(
+        'initial_pose_x', default_value='0.0',
+        description='AMCL initial pose X')
+    initial_pose_y_arg = DeclareLaunchArgument(
+        'initial_pose_y', default_value='0.0',
+        description='AMCL initial pose Y')
+    initial_pose_yaw_arg = DeclareLaunchArgument(
+        'initial_pose_yaw', default_value='0.0',
+        description='AMCL initial pose yaw')
+    start_gazebo_arg = DeclareLaunchArgument(
+        'start_gazebo', default_value='True',
+        description='Start Gazebo simulator process')
     rviz_config_arg = DeclareLaunchArgument(
         'rviz_config',
-        default_value=os.path.join(project_dir, 'config', 'nav.rviz'),
+        default_value=os.path.join(project_dir, 'config', 'nav_multi.rviz'),
         description='RViz config file')
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz', default_value='True',
@@ -85,12 +116,20 @@ def generate_launch_description():
         use_respawn = use_respawn_str.lower() in ('true', '1', 'yes')
         vehicle_namespace = LaunchConfiguration('namespace').perform(context)
         use_rviz_str = LaunchConfiguration('use_rviz').perform(context)
+        spawn_x = LaunchConfiguration('spawn_x').perform(context)
+        spawn_y = LaunchConfiguration('spawn_y').perform(context)
+        spawn_z = LaunchConfiguration('spawn_z').perform(context)
+        initial_pose_x = LaunchConfiguration('initial_pose_x').perform(context)
+        initial_pose_y = LaunchConfiguration('initial_pose_y').perform(context)
+        initial_pose_yaw = LaunchConfiguration('initial_pose_yaw').perform(context)
+        start_gazebo = LaunchConfiguration('start_gazebo').perform(context)
 
         # Load profile config
         profile_cfg = load_profile_yaml(profile, project_dir)
         use_sim_time = profile_cfg.get('use_sim_time', profile == 'gazebo')
         base_frame = profile_cfg.get('frames', {}).get('base_frame', 'body_link')
         odom_frame = profile_cfg.get('frames', {}).get('odom_frame', 'odom')
+        odom_topic = profile_cfg.get('sensors', {}).get('odom', {}).get('topic', 'odom')
         imu_topic = profile_cfg.get('sensors', {}).get('imu', {}).get('topic', '/imu')
         chassis_type = profile_cfg.get('chassis', {}).get('type', 'gazebo')
 
@@ -108,12 +147,16 @@ def generate_launch_description():
         map_file = LaunchConfiguration('map_file').perform(context)
 
         # --- Build EKF parameters with profile overrides ---
-        ekf_params = [ekf_config, {
+        # Pass the extracted ros__parameters directly so they apply under namespaces.
+        ekf_node_params = load_node_params_yaml(ekf_config, 'ekf_filter_node')
+        ekf_node_params.update({
             'use_sim_time': use_sim_time,
             'odom_frame': odom_frame,
             'base_link_frame': base_frame,
+            'odom0': odom_topic,
             'imu0': imu_topic,
-        }]
+        })
+        ekf_params = [ekf_node_params]
 
         # --- Determine lifecycle_starter_custom node list ---
         custom_lifecycle_nodes = ['opentcs_vehicle_node', 'route_graph_loader']
@@ -145,6 +188,11 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
+                'spawn_x': spawn_x,
+                'spawn_y': spawn_y,
+                'spawn_z': spawn_z,
+                'start_gazebo': start_gazebo,
             }.items(),
         )
 
@@ -206,11 +254,13 @@ def generate_launch_description():
         wait_scan = Node(
             package='lidar_slam_nodes',
             executable='wait_for_topic',
+            name='wait_scan',
             output='screen',
             parameters=[{
                 'topic_name': 'scan',
                 'min_publishers': 1,
                 'timeout': 30.0,
+                'exit_on_timeout': False,
                 'use_sim_time': use_sim_time,
             }],
         )
@@ -233,13 +283,16 @@ def generate_launch_description():
         wait_ekf_tf = Node(
             package='lidar_slam_nodes',
             executable='wait_for_tf',
+            name='wait_ekf_tf',
             output='screen',
+            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
             parameters=[{
                 'use_sim_time': use_sim_time,
                 'target_frame': odom_frame,
                 'source_frame': base_frame,
                 'timeout': 20.0,
                 'check_period': 0.5,
+                'exit_on_timeout': False,
             }],
         )
 
@@ -256,6 +309,9 @@ def generate_launch_description():
                 'use_composition': 'False',
                 'use_respawn': str(use_respawn).lower(),
                 'vehicle_name': LaunchConfiguration('vehicle_name').perform(context),
+                'initial_pose_x': initial_pose_x,
+                'initial_pose_y': initial_pose_y,
+                'initial_pose_yaw': initial_pose_yaw,
 
             }.items(),
         )
@@ -264,11 +320,13 @@ def generate_launch_description():
         wait_localization_ready = Node(
             package='lidar_slam_nodes',
             executable='wait_for_topic',
+            name='wait_localization_ready',
             output='screen',
             parameters=[{
                 'topic_name': 'map',
                 'min_publishers': 1,
                 'timeout': 30.0,
+                'exit_on_timeout': False,
                 'use_sim_time': use_sim_time,
             }],
         )
@@ -343,11 +401,13 @@ def generate_launch_description():
         wait_route = Node(
             package='lidar_slam_nodes',
             executable='wait_for_service',
+            name='wait_route',
             output='screen',
             parameters=[{
                 'service_name': 'route_server/set_route_graph',
                 'service_type': 'nav2_msgs/srv/SetRouteGraph',
                 'timeout': 30.0,
+                'exit_on_timeout': False,
                 'use_sim_time': use_sim_time,
             }],
         )
@@ -359,6 +419,7 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': use_sim_time,
                 'graph_save_path': '/tmp/route_graph.geojson',
+                'route_graph_topic': 'route_graph_json',
             }],
             respawn=use_respawn,
             respawn_delay=2.0,
@@ -378,11 +439,19 @@ def generate_launch_description():
         # Event-driven startup chains
         # =====================================================================
 
+        # Helper: wrap actions in GroupAction with PushRosNamespace.
+        # Required because RegisterEventHandler → OnProcessExit does NOT inherit
+        # PushRosNamespace from the enclosing GroupAction (ROS2 launch limitation).
+        def _ns_wrap(*nodes):
+            if not vehicle_namespace:
+                return list(nodes)
+            return [GroupAction(actions=[PushRosNamespace(vehicle_namespace), *nodes])]
+
         # Chain 1: /scan ready → EKF + wait_ekf_tf (gate starts WITH dependency)
         chain_ekf = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_scan,
-                on_exit=[ekf, wait_ekf_tf],
+                on_exit=_ns_wrap(ekf, wait_ekf_tf),
             )
         )
 
@@ -390,7 +459,10 @@ def generate_launch_description():
         chain_localization = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_ekf_tf,
-                on_exit=[localization, wait_localization_ready],
+                on_exit=[
+                    localization,  # IncludeLaunchDescription with own PushRosNamespace
+                    *_ns_wrap(wait_localization_ready),
+                ],
             )
         )
 
@@ -399,11 +471,13 @@ def generate_launch_description():
             OnProcessExit(
                 target_action=wait_localization_ready,
                 on_exit=[
-                    navigation,
-                    lifecycle_starter_custom,
-                    cmd_vel_bridge_node,
-                    opentcs_vehicle,
-                    wait_route,
+                    navigation,  # IncludeLaunchDescription with own PushRosNamespace
+                    *_ns_wrap(
+                        lifecycle_starter_custom,
+                        cmd_vel_bridge_node,
+                        opentcs_vehicle,
+                        wait_route,
+                    ),
                 ],
             )
         )
@@ -412,7 +486,7 @@ def generate_launch_description():
         chain_route = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_route,
-                on_exit=[route_graph_loader],
+                on_exit=_ns_wrap(route_graph_loader),
             )
         )
 
@@ -446,6 +520,13 @@ def generate_launch_description():
         respawn_arg,
         vehicle_name_arg,
         namespace_arg,
+        spawn_x_arg,
+        spawn_y_arg,
+        spawn_z_arg,
+        initial_pose_x_arg,
+        initial_pose_y_arg,
+        initial_pose_yaw_arg,
+        start_gazebo_arg,
         rviz_config_arg,
         use_rviz_arg,
         # Opaque function for runtime profile evaluation

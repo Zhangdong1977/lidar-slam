@@ -2,7 +2,7 @@
 """模拟 openTCS Sidecar: 发布路由图 + 发送路由导航目标.
 
 完整模拟 Sidecar 行为:
-  1. 发布 GeoJSON 路由图到 /route_graph (Transient Local)
+  1. 发布 GeoJSON 路由图到 route_graph_json (Transient Local)
   2. 等待 route_server 加载路由图
   3. 调用 ComputeAndTrackRoute action 按路由图导航
   4. 监控导航进度并输出结果
@@ -122,7 +122,7 @@ ROUTE_GRAPH = {
 START_NODE_ID = 0   # Depot (0, 0)
 GOAL_NODE_ID = 5    # NE-Station (10, 5)
 
-ACTION_NAME = '/route_server/compute_and_track_route'
+ACTION_NAME = 'route_server/compute_and_track_route'
 
 
 class SidecarSimulator(Node):
@@ -134,11 +134,19 @@ class SidecarSimulator(Node):
         self.declare_parameter('start_node', START_NODE_ID)
         self.declare_parameter('goal_node', GOAL_NODE_ID)
         self.declare_parameter('nav_timeout', 120.0)
+        self.declare_parameter('namespace', '')
+        self.declare_parameter('route_graph_topic', 'route_graph_json')
+        self.declare_parameter('action_name', ACTION_NAME)
 
         self._skip_graph = self.get_parameter('skip_graph_publish').value
         self._start_id = self.get_parameter('start_node').value
         self._goal_id = self.get_parameter('goal_node').value
         self._timeout = self.get_parameter('nav_timeout').value
+        namespace = self.get_parameter('namespace').value.strip('/')
+        graph_topic = self.get_parameter('route_graph_topic').value
+        action_name = self.get_parameter('action_name').value
+        self._graph_topic = self._resolve_name(namespace, graph_topic)
+        self._action_name = self._resolve_name(namespace, action_name)
 
         # Route graph publisher (Transient Local QoS)
         qos = QoSProfile(
@@ -146,11 +154,11 @@ class SidecarSimulator(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self._graph_pub = self.create_publisher(String, '/route_graph', qos)
+        self._graph_pub = self.create_publisher(String, self._graph_topic, qos)
 
         # ComputeAndTrackRoute action client
         self._action_client = ActionClient(
-            self, ComputeAndTrackRoute, ACTION_NAME)
+            self, ComputeAndTrackRoute, self._action_name)
 
         # State machine
         self._step = 0
@@ -160,6 +168,13 @@ class SidecarSimulator(Node):
 
         # Kick off after a short delay
         self.create_timer(2.0, self._tick)
+
+    @staticmethod
+    def _resolve_name(namespace: str, name: str) -> str:
+        clean_name = name.strip('/')
+        if namespace:
+            return f'/{namespace}/{clean_name}'
+        return f'/{clean_name}'
 
     # -----------------------------------------------------------------
     # State machine
@@ -193,7 +208,7 @@ class SidecarSimulator(Node):
             1 for f in ROUTE_GRAPH['features']
             if f['geometry']['type'] in ('LineString', 'MultiLineString'))
         self.get_logger().info(
-            f'已发布路由图到 /route_graph: {n_nodes} 节点, {n_edges} 边')
+            f'已发布路由图到 {self._graph_topic}: {n_nodes} 节点, {n_edges} 边')
 
     def _wait_and_navigate(self):
         if not self._action_client.wait_for_server(timeout_sec=1.0):
