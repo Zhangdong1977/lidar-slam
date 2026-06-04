@@ -61,19 +61,22 @@ CallbackReturn VehicleController::on_configure(const rclcpp_lifecycle::State & /
 
 CallbackReturn VehicleController::on_activate(const rclcpp_lifecycle::State & /*state*/)
 {
+  // Use relative topic names so PushRosNamespace can qualify them for
+  // multi-vehicle deployment.  The launch file may remap them further
+  // (e.g. to rs485/steering_angle in the Gazebo profile).
   steering_angle_subscriber_ = create_subscription<std_msgs::msg::Float64>(
-    "/steering_angle", 10,
+    "steering_angle", 10,
     std::bind(&VehicleController::steering_angle_callback, this, std::placeholders::_1));
 
   velocity_subscriber_ = create_subscription<std_msgs::msg::Float64>(
-    "/velocity", 10,
+    "velocity", 10,
     std::bind(&VehicleController::velocity_callback, this, std::placeholders::_1));
 
   position_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>(
-    "/forward_position_controller/commands", 10);
+    "forward_position_controller/commands", 10);
 
   velocity_publisher_ = create_publisher<std_msgs::msg::Float64MultiArray>(
-    "/forward_velocity_controller/commands", 10);
+    "forward_velocity_controller/commands", 10);
 
   timer_ = create_wall_timer(
     std::chrono::duration<double>(timer_period_),

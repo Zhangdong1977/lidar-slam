@@ -17,12 +17,18 @@ def main():
         'forward_velocity_controller',
     ]
 
-    # Discover controller_manager service (try namespaced then root)
+    # Discover controller_manager service.
+    # Search order:
+    #   1. Relative name – resolves under node namespace (PushRosNamespace)
+    #   2. Gazebo model namespace – /ackermann_robot/controller_manager
+    #   3. Root – /controller_manager (legacy fallback)
     load_srv = None
     config_srv = None
     switch_srv = None
 
-    for base in ['/controller_manager', '/ackermann_robot/controller_manager']:
+    for base in ['controller_manager',
+                 '/ackermann_robot/controller_manager',
+                 '/controller_manager']:
         load_name = f'{base}/load_controller'
         config_name = f'{base}/configure_controller'
         switch_name = f'{base}/switch_controller'
