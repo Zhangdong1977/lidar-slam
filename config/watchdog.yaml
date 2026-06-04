@@ -25,12 +25,12 @@ node_watchdog:
 
     # Topics whose staleness is CRITICAL (triggers ERROR)
     critical_topics:
-      - /scan
-      - /odom
-      - /tf
-      - /cmd_vel
-      - /amcl_pose
+      - scan
+      - odom
+      - tf
+      - cmd_vel
+      - amcl_pose
 
     # Topics whose staleness is non-critical (triggers WARN)
     non_critical_topics:
-      - /route_graph/markers
+      - route_graph/markers

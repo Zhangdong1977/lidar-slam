@@ -93,8 +93,8 @@ class OpentcsVehicleNode(LifecycleNode):
         self.declare_parameter('goal_pose_topic', f'/{vehicle_name}/goal_pose')
         self.declare_parameter('robot_state_topic', f'/{vehicle_name}/robot_state')
         self.declare_parameter('battery_state_topic', f'/{vehicle_name}/battery_state')
-        # Nav2/internal topics: no vehicle name prefix
-        self.declare_parameter('nav_action_name', '/navigate_to_pose')
+        # Nav2/internal topics: relative names resolve under namespace
+        self.declare_parameter('nav_action_name', 'navigate_to_pose')
         self.declare_parameter('pose_publish_rate', 10.0)
         self.declare_parameter('status_sample_ms', 1000)
         self.declare_parameter('heartbeat_timeout_ms', 30000)
@@ -109,9 +109,13 @@ class OpentcsVehicleNode(LifecycleNode):
         self.declare_parameter('obstacle_detection_mode', 'collision_monitor')
         self.declare_parameter('obstacle_scan_threshold', 0.5)
         self.declare_parameter('obstacle_scan_angle_window', 1.047)
-        self.declare_parameter('battery_real_topic', '/battery_state_real')
-        self.declare_parameter('odom_topic', '/odom')
-        self.declare_parameter('amcl_subscribe_topic', '/amcl_pose')
+        self.declare_parameter('battery_real_topic', 'battery_state_real')
+        self.declare_parameter('odom_topic', 'odom')
+        self.declare_parameter('amcl_subscribe_topic', 'amcl_pose')
+        self.declare_parameter('cmd_vel_topic', 'cmd_vel')
+        self.declare_parameter('collision_monitor_state_topic', 'collision_monitor_state')
+        self.declare_parameter('scan_topic', 'scan')
+        self.declare_parameter('global_costmap_topic', 'global_costmap/costmap')
         self.declare_parameter('position_report_topic', '')
         self.declare_parameter('map_yaml_file', '')
         self.declare_parameter('error_auto_recover_ms', 10000)
@@ -255,7 +259,8 @@ class OpentcsVehicleNode(LifecycleNode):
         self._state_pub = self.create_publisher(String, state_topic, 10)
         self._battery_pub = self.create_publisher(
             BatteryState, battery_topic, 10)
-        self._cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self._cmd_vel_pub = self.create_publisher(
+            Twist, self.get_parameter('cmd_vel_topic').value, 10)
 
         # --- Subscribers ---
         goal_topic = self.get_parameter('goal_pose_topic').value
@@ -278,17 +283,20 @@ class OpentcsVehicleNode(LifecycleNode):
         # Obstacle detection subscription (conditional)
         obs_mode = self.get_parameter('obstacle_detection_mode').value
         if obs_mode == 'collision_monitor':
+            scan_topic = self.get_parameter('scan_topic').value
+            cm_topic = self.get_parameter('collision_monitor_state_topic').value
             if _HAS_CM_MSG:
                 self.create_subscription(CollisionMonitorStateMsg,
-                                         '/collision_monitor_state',
+                                         cm_topic,
                                          self._collision_monitor_cb, 10)
             else:
                 self.get_logger().warn(
                     'nav2_collision_monitor.msg unavailable, falling back to scan mode')
-                self.create_subscription(LaserScan, '/scan',
+                self.create_subscription(LaserScan, scan_topic,
                                          self._scan_obstacle_cb, 10)
         elif obs_mode == 'scan':
-            self.create_subscription(LaserScan, '/scan', self._scan_obstacle_cb, 10)
+            scan_topic = self.get_parameter('scan_topic').value
+            self.create_subscription(LaserScan, scan_topic, self._scan_obstacle_cb, 10)
 
         # Real battery subscription (when sim disabled)
         if not self._battery_sim:
@@ -304,8 +312,9 @@ class OpentcsVehicleNode(LifecycleNode):
                                      self._position_report_cb, 10)
 
         # 全局代价地图订阅（目标点边界校验）
+        costmap_topic = self.get_parameter('global_costmap_topic').value
         self.create_subscription(
-            OccupancyGrid, '/global_costmap/costmap',
+            OccupancyGrid, costmap_topic,
             self._global_costmap_cb, 1)
 
         # --- Action client ---

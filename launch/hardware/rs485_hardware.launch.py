@@ -35,6 +35,7 @@ def generate_launch_description():
     use_respawn = LaunchConfiguration('use_respawn')
 
     # 1. RPLIDAR S2L
+    #    Defensive remapping: ensure 'scan' topic resolves under namespace
     rplidar = Node(
         package='rplidar_ros',
         executable='rplidar_node',
@@ -49,11 +50,13 @@ def generate_launch_description():
             'angle_compensate': True,
             'scan_mode': 'DenseBoost',
         }],
+        remappings=[('/scan', 'scan')],
         respawn=use_respawn,
         respawn_delay=2.0,
     )
 
     # 2. static TF: base_link -> laser
+    #    TF remapping for namespace isolation
     laser_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -64,10 +67,40 @@ def generate_launch_description():
             '--child-frame-id', 'laser',
         ],
         parameters=[{'use_sim_time': use_sim_time}],
+        remappings=[('/tf_static', 'tf_static')],
+    )
+
+    # 2b. static TF: base_link -> imu_link (IMU on STM32 board)
+    imu_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=[
+            '--x', '0', '--y', '0', '--z', '0.02',
+            '--roll', '0', '--pitch', '0', '--yaw', '0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'imu_link',
+        ],
+        parameters=[{'use_sim_time': use_sim_time}],
+        remappings=[('/tf_static', 'tf_static')],
+    )
+
+    # 2c. IMU Madgwick filter: /imu/data_raw -> /imu/data
+    imu_config = os.path.join(project_dir, 'config', 'imu.yaml')
+    imu_filter = Node(
+        package='imu_filter_madgwick',
+        executable='imu_filter_madgwick_node',
+        name='imu_filter',
+        output='screen',
+        parameters=[imu_config, {'use_sim_time': use_sim_time}],
+        remappings=[
+            ('/imu/data_raw', 'imu/data_raw'),
+            ('/imu/data', 'imu/data'),
+        ],
     )
 
     # 3. car_base_node (provides /odom + /imu/data_raw from STM32)
     #    Override frame IDs to match our convention
+    #    Defensive remappings: absolute topics → relative for namespace support
     car_base = Node(
         package='car_base',
         executable='car_base_node',
@@ -79,11 +112,21 @@ def generate_launch_description():
             'gyro_frame_id': 'imu_link',
             'use_sim_time': use_sim_time,
         }],
+        remappings=[
+            ('/odom', 'odom'),
+            ('/imu/data_raw', 'imu/data_raw'),
+            ('/cmd_vel', 'cmd_vel'),
+            ('/joint_states', 'joint_states'),
+            ('/PowerVoltage', 'PowerVoltage'),
+            ('/tf', 'tf'),
+            ('/tf_static', 'tf_static'),
+        ],
         respawn=use_respawn,
         respawn_delay=2.0,
     )
 
     # 4. cmd_vel_bridge: /cmd_vel -> /steering_angle + /velocity
+    #    Defensive remappings for namespace support
     cmd_vel_bridge = Node(
         package='lidar_slam_nodes',
         executable='cmd_vel_bridge',
@@ -94,6 +137,11 @@ def generate_launch_description():
             'max_steering_angle': 0.5236,
             'max_velocity': 1.4,
         }],
+        remappings=[
+            ('/cmd_vel', 'cmd_vel'),
+            ('/steering_angle', 'steering_angle'),
+            ('/velocity', 'velocity'),
+        ],
         respawn=use_respawn,
         respawn_delay=2.0,
     )
@@ -127,6 +175,8 @@ def generate_launch_description():
         # Hardware nodes
         rplidar,
         laser_tf,
+        imu_tf,
+        imu_filter,
         car_base,
         cmd_vel_bridge,
         rs485_bridge_delayed,

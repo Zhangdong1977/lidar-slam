@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Bridge /PowerVoltage (Float32) to /battery_state (BatteryState).
+"""Bridge PowerVoltage (Float32) to battery_state (BatteryState).
 
-Subscribes: /PowerVoltage (std_msgs/Float32) — raw voltage from STM32
-Publishes:  /battery_state (sensor_msgs/BatteryState) — standard ROS2 battery message
+Subscribes: PowerVoltage (std_msgs/Float32) — raw voltage from STM32
+Publishes:  battery_state (sensor_msgs/BatteryState) — standard ROS2 battery message
 
 Voltage-to-percentage mapping (configurable):
   24.0V = 100%, 20.0V = 0% (linear interpolation)
@@ -30,9 +30,9 @@ class BatteryBridge(Node):
         self.latest_voltage = None
 
         self.sub = self.create_subscription(
-            Float32, '/PowerVoltage', self.voltage_callback, 10)
+            Float32, 'PowerVoltage', self.voltage_callback, 10)
 
-        self.pub = self.create_publisher(BatteryState, '/battery_state', 10)
+        self.pub = self.create_publisher(BatteryState, 'battery_state', 10)
 
         rate = self.get_parameter('publish_rate').value
         self.timer = self.create_timer(1.0 / rate, self.publish_battery)

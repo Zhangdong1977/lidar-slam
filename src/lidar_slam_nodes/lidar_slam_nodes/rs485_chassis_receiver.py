@@ -38,8 +38,8 @@ class RS485ChassisReceiver(LifecycleNode):
         self.buffer = b''
         self.last_frame_time = self.get_clock().now()
 
-        self.steer_pub = self.create_publisher(Float64, '/rs485/steering_angle', 10)
-        self.vel_pub = self.create_publisher(Float64, '/rs485/velocity', 10)
+        self.steer_pub = self.create_publisher(Float64, 'rs485/steering_angle', 10)
+        self.vel_pub = self.create_publisher(Float64, 'rs485/velocity', 10)
 
         self.get_logger().info(f'RS485 receiver configured: timeout={self.timeout_sec}s')
         return TransitionCallbackReturn.SUCCESS

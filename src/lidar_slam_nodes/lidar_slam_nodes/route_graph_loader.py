@@ -47,8 +47,13 @@ class RouteGraphLoader(LifecycleNode):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
+        self.declare_parameter('route_graph_topic', 'route_graph')
+        self.declare_parameter('route_graph_markers_topic', 'route_graph/markers')
+        graph_topic = self.get_parameter('route_graph_topic').value
+        markers_topic = self.get_parameter('route_graph_markers_topic').value
+
         self._sub = self.create_subscription(
-            String, '/route_graph', self._on_graph, qos)
+            String, graph_topic, self._on_graph, qos)
 
         marker_qos = QoSProfile(
             depth=10,
@@ -56,12 +61,12 @@ class RouteGraphLoader(LifecycleNode):
             reliability=ReliabilityPolicy.RELIABLE,
         )
         self._marker_pub = self.create_publisher(
-            MarkerArray, '/route_graph/markers', marker_qos)
+            MarkerArray, markers_topic, marker_qos)
 
         self._timer = self.create_timer(2.0, self._wait_service)
 
         self.get_logger().info(
-            f'Ready: waiting for /route_graph, service={self._svc_name}')
+            f'Ready: waiting for {graph_topic}, service={self._svc_name}')
         return super().on_activate(state)
 
     def on_deactivate(self, state: LifecycleState):

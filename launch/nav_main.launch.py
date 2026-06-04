@@ -27,6 +27,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
     OpaqueFunction,
     RegisterEventHandler,
@@ -36,7 +37,7 @@ from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushRosNamespace
 
 
 def load_profile_yaml(profile_name_str, project_dir):
@@ -73,6 +74,9 @@ def generate_launch_description():
         'rviz_config',
         default_value=os.path.join(project_dir, 'config', 'nav.rviz'),
         description='RViz config file')
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz', default_value='True',
+        description='Launch RViz2 for visualization')
 
     # Use OpaqueFunction to access launch configuration at runtime
     def launch_setup(context):
@@ -80,6 +84,7 @@ def generate_launch_description():
         use_respawn_str = LaunchConfiguration('use_respawn').perform(context)
         use_respawn = use_respawn_str.lower() in ('true', '1', 'yes')
         vehicle_namespace = LaunchConfiguration('namespace').perform(context)
+        use_rviz_str = LaunchConfiguration('use_rviz').perform(context)
 
         # Load profile config
         profile_cfg = load_profile_yaml(profile, project_dir)
@@ -176,6 +181,9 @@ def generate_launch_description():
             output='screen',
             parameters=[{'use_sim_time': use_sim_time}],
             arguments=['-d', rviz_config],
+            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
+            condition=IfCondition(
+                PythonExpression(["'", use_rviz_str, "' == 'True'"])),
         )
 
         watchdog = Node(
@@ -184,6 +192,7 @@ def generate_launch_description():
             name='node_watchdog',
             output='screen',
             parameters=[watchdog_config, {'use_sim_time': use_sim_time}],
+            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
             respawn=True,
             respawn_delay=5.0,
         )
@@ -199,7 +208,7 @@ def generate_launch_description():
             executable='wait_for_topic',
             output='screen',
             parameters=[{
-                'topic_name': '/scan',
+                'topic_name': 'scan',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,
@@ -212,6 +221,7 @@ def generate_launch_description():
             name='ekf_filter_node',
             output='screen',
             parameters=ekf_params,
+            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
             respawn=use_respawn,
             respawn_delay=2.0,
         )
@@ -239,6 +249,7 @@ def generate_launch_description():
                 os.path.join(project_dir, 'launch', 'localization.launch.py')),
             launch_arguments={
                 'map': map_file,
+                'namespace': vehicle_namespace,
                 'use_sim_time': str(use_sim_time).lower(),
                 'params_file': nav2_params,
                 'autostart': 'True',
@@ -255,7 +266,7 @@ def generate_launch_description():
             executable='wait_for_topic',
             output='screen',
             parameters=[{
-                'topic_name': '/map',
+                'topic_name': 'map',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,
@@ -270,6 +281,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(project_dir, 'launch', 'navigation.launch.py')),
             launch_arguments={
+                'namespace': vehicle_namespace,
                 'use_sim_time': str(use_sim_time).lower(),
                 'autostart': 'True',
                 'params_file': nav2_params,
@@ -312,7 +324,6 @@ def generate_launch_description():
         opentcs_vehicle = Node(
             package='lidar_slam_nodes',
             executable='opentcs_vehicle_node',
-            namespace=vehicle_namespace,
             output='screen',
             parameters=[opentcs_vehicle_config, {
                 'use_sim_time': use_sim_time,
@@ -320,6 +331,7 @@ def generate_launch_description():
                 'namespace': vehicle_namespace,
                 'base_frame': base_frame,
             }],
+            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
             respawn=use_respawn,
             respawn_delay=2.0,
         )
@@ -333,7 +345,7 @@ def generate_launch_description():
             executable='wait_for_service',
             output='screen',
             parameters=[{
-                'service_name': '/route_server/set_route_graph',
+                'service_name': 'route_server/set_route_graph',
                 'service_type': 'nav2_msgs/srv/SetRouteGraph',
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,
@@ -355,7 +367,6 @@ def generate_launch_description():
         material_action_gui = Node(
             package='jvs_agv_material_actions',
             executable='material_action_gui',
-            namespace=vehicle_namespace,
             output='screen',
             parameters=[material_action_config, {
                 'use_sim_time': use_sim_time,
@@ -421,7 +432,12 @@ def generate_launch_description():
             material_delayed,
         ])
 
-        return actions
+        # Wrap all actions in GroupAction with namespace for multi-vehicle support.
+        # When namespace='', PushRosNamespace('') is a no-op → backward compatible.
+        return [GroupAction(actions=[
+            PushRosNamespace(vehicle_namespace),
+            *actions,
+        ])]
 
     return LaunchDescription([
         # Arguments
@@ -431,6 +447,7 @@ def generate_launch_description():
         vehicle_name_arg,
         namespace_arg,
         rviz_config_arg,
+        use_rviz_arg,
         # Opaque function for runtime profile evaluation
         OpaqueFunction(function=launch_setup),
     ])

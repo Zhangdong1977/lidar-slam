@@ -1,28 +1,50 @@
+# EKF configuration for robot_localization
+# Fuses wheel odometry (/odom) + IMU (filtered /imu/data) → refined odom→base TF
+#
+# Key differences from vendor's ekf.yaml:
+#   - two_d_mode: true (planar robot, ignore Z-axis noise)
+#   - odom0: uses differential mode to avoid drift accumulation
+#   - imu0: uses relative mode to ignore initial IMU yaw offset
+#
+# Profile-specific overrides (odom_frame, base_link_frame, imu0 topic)
+# are applied in the launch files via parameter override dicts.
+
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
+    sensor_timeout: 0.1
     two_d_mode: true
     publish_tf: true
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+
+    # Frames — base_link_frame and odom_frame are overridden per-profile in launch
     map_frame: map
     odom_frame: odom
-    base_link_frame: body_link
+    base_link_frame: base_link
     world_frame: odom
 
-    odom0: /odom
-    odom0_config: [false, false, false,
-                   false, false, true,
-                   true,  false, false,
-                   false, false, true,
-                   false, false, false]
+    # ── Odometry input (from car_base_node / STM32) ──
+    # Vendor fuses: x, vx, vy, vyaw in differential mode
+    odom0: odom
+    odom0_config: [true,  false, false,    # x, y, z
+                   false, false, false,    # roll, pitch, yaw
+                   true,  true,  false,    # vx, vy, vz
+                   false, false, true,     # vroll, vpitch, vyaw
+                   false, false, false]    # ax, ay, az
     odom0_queue_size: 20
-    odom0_differential: false
+    odom0_differential: true               # avoid absolute position drift
+    odom0_relative: false
 
-    imu0: /imu
-    imu0_config: [false, false, false,
-                  false, false, false,
-                  false, false, false,
-                  false, false, true,
-                  true,  true,  false]
+    # ── IMU input (from imu_filter_madgwick_node, filtered) ──
+    # Vendor fuses: yaw, vyaw in relative mode
+    imu0: imu
+    imu0_config: [false, false, false,     # x, y, z
+                  false, false, true,      # roll, pitch, yaw
+                  false, false, false,     # vx, vy, vz
+                  false, false, true,      # vroll, vpitch, vyaw
+                  false, false, false]     # ax, ay, az
     imu0_queue_size: 20
     imu0_differential: false
+    imu0_relative: true                    # ignore initial IMU yaw offset
     imu0_remove_gravitational_acceleration: true

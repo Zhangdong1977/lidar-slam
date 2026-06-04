@@ -2,8 +2,8 @@ opentcs_vehicle_node:
   ros__parameters:
     vehicle_name: "ackermann_robot"
     access_identity: "ackermann_robot"
-    namespace: ""
-    domain_id: 42
+    namespace: "c30_1"
+    domain_id: 30
     base_frame: "body_link"
     map_frame: "map"
     # Sidecar topics are auto-constructed from vehicle_name:
@@ -13,7 +13,7 @@ opentcs_vehicle_node:
     # goal_pose_topic: "/ackermann_robot/goal_pose"
     # robot_state_topic: "/ackermann_robot/robot_state"
     # battery_state_topic: "/ackermann_robot/battery_state"
-    nav_action_name: "/navigate_to_pose"
+    nav_action_name: "navigate_to_pose"
     pose_publish_rate: 10.0
     status_sample_ms: 1000
     heartbeat_timeout_ms: 30000
@@ -28,9 +28,9 @@ opentcs_vehicle_node:
     obstacle_detection_mode: "collision_monitor"
     obstacle_scan_threshold: 0.5
     obstacle_scan_angle_window: 1.047
-    battery_real_topic: "/battery_state_real"
-    odom_topic: "/odom"
-    amcl_subscribe_topic: "/amcl_pose"
+    battery_real_topic: "battery_state_real"
+    odom_topic: "odom"
+    amcl_subscribe_topic: "amcl_pose"
     position_report_topic: ""
     map_yaml_file: ""
     error_auto_recover_ms: 10000

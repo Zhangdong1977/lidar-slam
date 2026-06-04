@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Frontier-based autonomous exploration for Ackermann robot.
 
-Subscribes to /map from slam_toolbox, detects frontier regions (boundary
+Subscribes to map from slam_toolbox, detects frontier regions (boundary
 between known-free and unknown space), and dispatches NavigateToPose goals
 to Nav2. The robot explores autonomously until no reachable frontiers remain.
 """
@@ -120,13 +120,13 @@ class FrontierExplorer(Node):
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
         )
-        self.create_subscription(OccupancyGrid, '/map', self.map_callback, map_qos)
+        self.create_subscription(OccupancyGrid, 'map', self.map_callback, map_qos)
 
         # Publishers
-        self.marker_pub = self.create_publisher(MarkerArray, '/frontier_markers', 10)
+        self.marker_pub = self.create_publisher(MarkerArray, 'frontier_markers', 10)
 
         # Action client
-        self.nav_client = ActionClient(self, NavigateToPose, '/navigate_to_pose')
+        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         # Timer
         self.create_timer(1.0 / explore_rate, self.explore_step)

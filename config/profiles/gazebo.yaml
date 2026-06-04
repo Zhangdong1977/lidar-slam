@@ -3,6 +3,7 @@
 
 hardware_profile: "gazebo"
 use_sim_time: true
+domain_id: 42
 
 chassis:
   type: "gazebo"
@@ -18,10 +19,10 @@ sensors:
     baudrate: 0
   imu:
     type: "gazebo_bridge"
-    topic: "/imu"
+    topic: "imu"
   odom:
     type: "gazebo_bridge"
-    topic: "/odom"
+    topic: "odom"
 
 frames:
   base_frame: "body_link"

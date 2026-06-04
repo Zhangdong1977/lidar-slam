@@ -92,7 +92,13 @@ def generate_launch_description():
             'qos_overrides./tf.publisher.durability': 'transient_local',
             'use_sim_time': use_sim_time,
         }],
-        remappings=[('/scan_raw', '/scan')],
+        remappings=[
+            ('/scan_raw', 'scan'),
+            ('/odom', 'odom'),
+            ('/imu', 'imu'),
+            ('/tf', 'tf'),
+            # /clock stays absolute (global for sim time synchronization)
+        ],
         output='screen',
         respawn=use_respawn,
         respawn_delay=2.0,
@@ -162,7 +168,7 @@ def generate_launch_description():
         executable='wait_for_topic',
         output='screen',
         parameters=[{
-            'topic_name': '/joint_states',
+            'topic_name': 'joint_states',
             'min_publishers': 1,
             'timeout': 30.0,
             'use_sim_time': use_sim_time,
@@ -185,8 +191,8 @@ def generate_launch_description():
         name='vehicle_controller',
         parameters=[params_yaml],
         remappings=[
-            ('/steering_angle', '/rs485/steering_angle'),
-            ('/velocity', '/rs485/velocity'),
+            ('steering_angle', 'rs485/steering_angle'),
+            ('velocity', 'rs485/velocity'),
         ],
         output='screen',
         respawn=use_respawn,
@@ -236,6 +242,7 @@ def generate_launch_description():
         # Arguments
         DeclareLaunchArgument('use_sim_time', default_value='True'),
         DeclareLaunchArgument('use_respawn', default_value='True'),
+        DeclareLaunchArgument('namespace', default_value=''),
 
         # Infrastructure
         socat,

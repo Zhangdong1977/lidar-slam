@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bridge Nav2 cmd_vel (Twist) to Ackermann vehicle_controller (Float64).
 
-Subscribes: /cmd_vel (geometry_msgs/Twist)
-Publishes:  /steering_angle (std_msgs/Float64), /velocity (std_msgs/Float64)
+Subscribes: cmd_vel (geometry_msgs/Twist)
+Publishes:  steering_angle (std_msgs/Float64), velocity (std_msgs/Float64)
 
 Conversion: velocity = twist.linear.x
             steering_angle = atan(wheel_base * angular.z / linear.x)
@@ -35,8 +35,8 @@ class CmdVelBridge(LifecycleNode):
         self.latest_twist = None
         self.last_twist_time = self.get_clock().now()
 
-        self.steering_pub = self.create_publisher(Float64, '/steering_angle', 10)
-        self.velocity_pub = self.create_publisher(Float64, '/velocity', 10)
+        self.steering_pub = self.create_publisher(Float64, 'steering_angle', 10)
+        self.velocity_pub = self.create_publisher(Float64, 'velocity', 10)
 
         self.get_logger().info(
             f'cmd_vel_bridge configured: wheel_base={self.wheel_base}, '
@@ -45,7 +45,7 @@ class CmdVelBridge(LifecycleNode):
         return TransitionCallbackReturn.SUCCESS
 
     def on_activate(self, state: LifecycleState):
-        self.create_subscription(Twist, '/cmd_vel', self.twist_callback, 10)
+        self.create_subscription(Twist, 'cmd_vel', self.twist_callback, 10)
         period = 1.0 / self.publish_rate
         self._timer = self.create_timer(period, self.timer_callback)
         return super().on_activate(state)

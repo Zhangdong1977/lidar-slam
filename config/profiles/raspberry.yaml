@@ -4,6 +4,7 @@
 
 hardware_profile: "raspberry"
 use_sim_time: false
+domain_id: 30
 
 chassis:
   type: "uart_stm32"
@@ -21,11 +22,11 @@ sensors:
     baudrate: 460800
   imu:
     type: "car_base"
-    topic: "/imu/data_raw"
+    topic: "imu/data"
     frame: "imu_link"
   odom:
     type: "car_base"
-    topic: "/odom"
+    topic: "odom"
 
 frames:
   base_frame: "base_link"
@@ -34,7 +35,7 @@ frames:
   imu_frame: "imu_link"
 
 vehicle:
-  wheel_base: 0.175
+  wheel_base: 0.143
   max_steering_angle: 0.785
   max_velocity: 0.3
   lidar_height: 0.15

@@ -19,7 +19,7 @@ from launch.substitutions import (
     NotEqualsSubstitution,
     PythonExpression,
 )
-from launch_ros.actions import Node, SetParameter
+from launch_ros.actions import Node, PushRosNamespace, SetParameter
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
@@ -51,6 +51,7 @@ def generate_launch_description():
     load_nodes = GroupAction(
         condition=IfCondition(PythonExpression(['not ', use_composition])),
         actions=[
+            PushRosNamespace(namespace),
             SetParameter('use_sim_time', LaunchConfiguration('use_sim_time')),
             # map_server: no map file provided (use yaml config)
             Node(
@@ -93,7 +94,7 @@ def generate_launch_description():
                 parameters=[configured_params],
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=remappings + [
-                    ('initialpose', ['/', vehicle_name, '/initialpose']),
+                    ('initialpose', 'initialpose'),
                 ],
             ),
             # KEY FIX: lifecycle_manager receives configured_params (from yaml)

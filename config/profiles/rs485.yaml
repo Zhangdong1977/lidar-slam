@@ -3,6 +3,7 @@
 
 hardware_profile: "rs485"
 use_sim_time: false
+domain_id: 30
 
 chassis:
   type: "rs485"
@@ -18,10 +19,10 @@ sensors:
     baudrate: 1000000
   imu:
     type: "car_base"
-    topic: "/imu/data_raw"
+    topic: "imu/data"
   odom:
     type: "car_base"
-    topic: "/odom"
+    topic: "odom"
 
 frames:
   base_frame: "base_link"

@@ -11,7 +11,9 @@
 #   ./scripts/launch/slam.sh --profile rs485                # RS-485 实车
 #   ./scripts/launch/slam.sh --profile raspberry            # 树莓派
 #   ./scripts/launch/slam.sh --profile rplidar_s2l          # 纯激光雷达 (无底盘)
+#   ./scripts/launch/slam.sh --joystick                     # 启动手柄遥控 (发布 /cmd_vel)
 #   ./scripts/launch/slam.sh --no-teleop                    # 不启动键盘遥控
+#   ./scripts/launch/slam.sh --no-rviz                      # 不启动 RViz (用于远程可视化)
 #   ./scripts/launch/slam.sh --slam-params /path/to/params  # 自定义SLAM参数
 # ─────────────────────────────────────────────────────────────────────
 
@@ -23,8 +25,12 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # 默认参数
 PROFILE="gazebo"
 USE_TELEOP="False"
+USE_JOYSTICK="False"
+USE_RVIZ="True"
 SLAM_PARAMS=""
 EXTRA_ARGS=""
+DOMAIN_ID=""
+NAMESPACE=""
 
 # 解析参数
 while [[ $# -gt 0 ]]; do
@@ -37,6 +43,14 @@ while [[ $# -gt 0 ]]; do
             USE_TELEOP="True"
             shift
             ;;
+        --joystick)
+            USE_JOYSTICK="True"
+            shift
+            ;;
+        --no-rviz)
+            USE_RVIZ="False"
+            shift
+            ;;
         --no-teleop)
             USE_TELEOP="False"
             shift
@@ -45,19 +59,29 @@ while [[ $# -gt 0 ]]; do
             SLAM_PARAMS="$2"
             shift 2
             ;;
+        --domain-id)
+            DOMAIN_ID="$2"
+            shift 2
+            ;;
+        --namespace)
+            NAMESPACE="$2"
+            shift 2
+            ;;
         *)
             echo "未知参数: $1"
-            echo "用法: $0 [--profile gazebo|rs485|raspberry|rplidar_s2l] [--teleop] [--no-teleop] [--slam-params FILE]"
+            echo "用法: $0 [--profile gazebo|rs485|raspberry|rplidar_s2l] [--teleop] [--joystick] [--no-teleop] [--no-rviz] [--slam-params FILE] [--domain-id ID] [--namespace NS]"
             exit 1
             ;;
     esac
 done
 
 # ── 环境初始化 (按 profile 区分) ──────────────────────────────────
+# 从 profile YAML 读取 domain_id（默认 42）
+DEFAULT_DOMAIN=$(python3 -c "import yaml; print(yaml.safe_load(open('${PROJECT_DIR}/config/profiles/${PROFILE}.yaml')).get('domain_id', 42))" 2>/dev/null || echo 42)
+export ROS_DOMAIN_ID="${DOMAIN_ID:-$DEFAULT_DOMAIN}"
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
 if [ "$PROFILE" = "raspberry" ]; then
-    # 树莓派环境: 无 conda, 独立 domain
-    export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
-    export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
     unset ROS_DISCOVERY_SERVER
     source /opt/ros/jazzy/setup.bash
     source /home/pi/ros2_ws/install/setup.bash 2>/dev/null || true
@@ -88,11 +112,15 @@ else
     eval "$(conda shell.bash hook)"
     conda activate lidar_slam
     source /opt/ros/jazzy/setup.bash
-    export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
-    export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
     unset ROS_LOCALHOST_ONLY
     unset ROS_DISCOVERY_SERVER
     source "${PROJECT_DIR}/install/setup.bash"
+fi
+
+# ── 手柄设备检测 ──────────────────────────────────────────────────
+if [ "$USE_JOYSTICK" = "True" ] && [ ! -e /dev/input/js0 ]; then
+    echo "WARN: 游戏手柄未连接 (/dev/input/js0), 跳过手柄控制"
+    USE_JOYSTICK="False"
 fi
 
 # ── 日志 ──────────────────────────────────────────────────────────
@@ -103,7 +131,10 @@ LOG_FILE="${LOG_DIR}/slam_${PROFILE}_$(date +%Y-%m-%d_%H-%M-%S).log"
 echo "============================================="
 echo "  手工建图场景"
 echo "  Profile: $PROFILE"
-echo "  Teleop:  $USE_TELEOP"
+echo "  Namespace: ${NAMESPACE:-无}"
+echo "  Teleop:   $USE_TELEOP"
+echo "  Joystick: $USE_JOYSTICK"
+echo "  RViz:     $USE_RVIZ"
 if [ -n "$SLAM_PARAMS" ]; then
     echo "  SLAM参数: $SLAM_PARAMS"
 fi
@@ -114,9 +145,12 @@ echo "============================================="
 bash "${PROJECT_DIR}/scripts/tools/cleanup_ros2.sh"
 
 # ── 构建 launch 参数 ──────────────────────────────────────────────
-LAUNCH_ARGS="hardware_profile:=${PROFILE} use_teleop:=${USE_TELEOP}"
+LAUNCH_ARGS="hardware_profile:=${PROFILE} use_teleop:=${USE_TELEOP} use_joystick:=${USE_JOYSTICK} use_rviz:=${USE_RVIZ}"
 if [ -n "$SLAM_PARAMS" ]; then
     LAUNCH_ARGS="$LAUNCH_ARGS slam_params_file:=$SLAM_PARAMS"
+fi
+if [ -n "$NAMESPACE" ]; then
+    LAUNCH_ARGS="$LAUNCH_ARGS namespace:=$NAMESPACE"
 fi
 
 # ── 启动 ──────────────────────────────────────────────────────────

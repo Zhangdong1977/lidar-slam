@@ -27,16 +27,23 @@ import os
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    EmitEvent,
+    GroupAction,
     IncludeLaunchDescription,
+    LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
 )
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
+from launch.events import matches_action
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node, PushRosNamespace
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 
 def load_profile_yaml(profile_name_str, project_dir):
@@ -68,11 +75,19 @@ def generate_launch_description():
     respawn_arg = DeclareLaunchArgument(
         'use_respawn', default_value='True',
         description='Enable automatic respawn of crashed nodes')
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz', default_value='True',
+        description='Launch RViz2 for visualization')
+    namespace_arg = DeclareLaunchArgument(
+        'namespace', default_value='',
+        description='Robot namespace for multi-vehicle support (e.g. c30_1)')
 
     def launch_setup(context):
         profile = LaunchConfiguration('hardware_profile').perform(context)
         use_respawn_raw = LaunchConfiguration('use_respawn').perform(context)
         use_respawn = use_respawn_raw.lower() == 'true'
+        use_rviz_str = LaunchConfiguration('use_rviz').perform(context)
+        vehicle_namespace = LaunchConfiguration('namespace').perform(context)
 
         # Load profile config
         profile_cfg = load_profile_yaml(profile, project_dir)
@@ -150,6 +165,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -160,6 +176,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -170,6 +187,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -196,6 +214,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{'use_sim_time': use_sim_time}],
             arguments=['-d', rviz_config],
+            condition=IfCondition(
+                PythonExpression(["'", use_rviz_str, "' == 'True'"])),
         )
 
         actions.extend([watchdog, rviz2])
@@ -209,7 +229,7 @@ def generate_launch_description():
             executable='wait_for_topic',
             output='screen',
             parameters=[{
-                'topic_name': '/scan',
+                'topic_name': 'scan',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,
@@ -283,18 +303,23 @@ def generate_launch_description():
             executable='wait_for_service',
             output='screen',
             parameters=[{
-                'service_name': '/lifecycle_manager_navigation/is_active',
+                'service_name': 'lifecycle_manager_navigation/is_active',
                 'service_type': 'std_srvs/srv/Trigger',
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,
             }],
         )
 
+        # Helper: wrap actions in GroupAction with namespace so that
+        # event-triggered nodes also inherit PushRosNamespace.
+        def ns_wrap(*acts):
+            return GroupAction(actions=[PushRosNamespace(vehicle_namespace), *acts])
+
         # Chain 1: /scan ready → EKF + scan_filter + wait_odom_tf
         chain_sensing = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_scan,
-                on_exit=[scan_filter, ekf, wait_odom_tf],
+                on_exit=[ns_wrap(scan_filter, ekf, wait_odom_tf)],
             )
         )
 
@@ -304,21 +329,27 @@ def generate_launch_description():
         # SLAM Layer: slam_toolbox (after EKF TF ready)
         # =====================================================================
 
+        # Use custom slam_toolbox launch with remappings for absolute topic names.
+        # Pass namespace directly — the custom launch sets it on the LifecycleNode.
+        # chain_slam is placed OUTSIDE the outer GroupAction to prevent
+        # PushRosNamespace from stacking with the LifecycleNode's own namespace.
         slam_toolbox = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource([
-                os.path.join(FindPackageShare('slam_toolbox').find('slam_toolbox'),
-                             'launch', 'online_async_launch.py')
-            ]),
+            PythonLaunchDescriptionSource(
+                os.path.join(project_dir, 'launch', 'slam_toolbox_namespaced.py')),
             launch_arguments={
                 'slam_params_file': slam_params,
                 'use_sim_time': str(use_sim_time).lower(),
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
         chain_slam = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_odom_tf,
-                on_exit=[slam_toolbox, wait_map_tf],
+                on_exit=[
+                    slam_toolbox,
+                    ns_wrap(wait_map_tf),
+                ],
             )
         )
 
@@ -339,6 +370,7 @@ def generate_launch_description():
                 'params_file': nav2_params,
                 'use_composition': 'False',
                 'use_respawn': use_respawn_raw.lower(),
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -378,10 +410,8 @@ def generate_launch_description():
             OnProcessExit(
                 target_action=wait_map_tf,
                 on_exit=[
-                    navigation,
-                    cmd_vel_bridge,
-                    lifecycle_starter_explore,
-                    wait_nav2_ready,
+                    ns_wrap(navigation, cmd_vel_bridge,
+                            lifecycle_starter_explore, wait_nav2_ready),
                 ],
             )
         )
@@ -405,13 +435,22 @@ def generate_launch_description():
         chain_explorer = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_nav2_ready,
-                on_exit=[frontier_explorer],
+                on_exit=[ns_wrap(frontier_explorer)],
             )
         )
 
         actions.extend([chain_explorer])
 
-        return actions
+        # Wrap most actions in GroupAction with namespace.
+        # chain_slam is placed OUTSIDE because slam_toolbox sets namespace
+        # directly on its LifecycleNode; PushRosNamespace would double it.
+        return [
+            GroupAction(actions=[
+                PushRosNamespace(vehicle_namespace),
+                *actions,
+            ]),
+            chain_slam,
+        ]
 
     return LaunchDescription([
         # Arguments
@@ -420,6 +459,8 @@ def generate_launch_description():
         nav2_params_arg,
         rviz_config_arg,
         respawn_arg,
+        use_rviz_arg,
+        namespace_arg,
         # Opaque function for runtime profile evaluation
         OpaqueFunction(function=launch_setup),
     ])

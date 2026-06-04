@@ -53,8 +53,8 @@ class RS485ChassisBridge(LifecycleNode):
         self.ser = serial.Serial(self.port, self.baudrate, timeout=0.01)
         self.get_logger().info(f'Opened serial port: {self.port} @ {self.baudrate}')
 
-        self.create_subscription(Float64, '/steering_angle', self.steering_cb, 10)
-        self.create_subscription(Float64, '/velocity', self.velocity_cb, 10)
+        self.create_subscription(Float64, 'steering_angle', self.steering_cb, 10)
+        self.create_subscription(Float64, 'velocity', self.velocity_cb, 10)
 
         period = self.interval_ms / 1000.0
         self._timer = self.create_timer(period, self.timer_cb)

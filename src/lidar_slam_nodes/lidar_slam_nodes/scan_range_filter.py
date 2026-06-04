@@ -13,8 +13,8 @@ class ScanRangeFilter(Node):
     def __init__(self):
         super().__init__('scan_range_filter')
         self._sub = self.create_subscription(
-            LaserScan, '/scan_raw', self._callback, 10)
-        self._pub = self.create_publisher(LaserScan, '/scan', 10)
+            LaserScan, 'scan_raw', self._callback, 10)
+        self._pub = self.create_publisher(LaserScan, 'scan', 10)
 
     def _callback(self, msg: LaserScan):
         out = LaserScan()

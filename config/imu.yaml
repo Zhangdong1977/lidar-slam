@@ -1,0 +1,11 @@
+# IMU Madgwick filter configuration
+# Reference: vendor's car_base/config/imu.yaml
+# Filters /imu/data_raw -> /imu/data for EKF fusion
+
+imu_filter_madgwick:
+  ros__parameters:
+    fixed_frame: "base_link"
+    use_mag: false
+    publish_tf: false
+    world_frame: "enu"
+    orientation_stddev: 0.05

@@ -1,0 +1,30 @@
+# Joystick config for C30 car (Xbox-like gamepad, 4 axes, 12 buttons, 1 hat)
+# Used with teleop_twist_joy package.
+#
+# Axis mapping (standard Xbox layout):
+#   axis 0: left stick horizontal  (left/right)
+#   axis 1: left stick vertical    (up/down)
+#   axis 2: right stick vertical   (up/down)
+#   axis 3: right stick horizontal (left/right)
+#
+# Speed limits match raspberry.yaml: max_velocity=0.3, max_steering_angle=0.785
+# wheel_base=0.143 => max_angular ~= 1.65 rad/s; capped at 1.2 for safety
+
+teleop_twist_joy_node:
+  ros__parameters:
+    axis_linear:
+      x: 1
+    scale_linear:
+      x: 0.3
+    scale_linear_turbo:
+      x: 0.3
+
+    axis_angular:
+      yaw: 0
+    scale_angular:
+      yaw: 1.2
+    scale_angular_turbo:
+      yaw: 1.2
+
+    enable_button: -1        # No dead-man switch (push stick to drive, matches vendor behavior)
+    enable_turbo_button: -1  # Turbo disabled

@@ -28,16 +28,23 @@ import os
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    EmitEvent,
+    GroupAction,
     IncludeLaunchDescription,
+    LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
 )
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
+from launch.events import matches_action
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node, PushRosNamespace
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
 from launch_ros.substitutions import FindPackageShare
+from lifecycle_msgs.msg import Transition
 
 
 def load_profile_yaml(profile_name_str, project_dir):
@@ -60,6 +67,12 @@ def generate_launch_description():
     use_teleop_arg = DeclareLaunchArgument(
         'use_teleop', default_value='False',
         description='Launch keyboard teleop for manual mapping')
+    use_joystick_arg = DeclareLaunchArgument(
+        'use_joystick', default_value='False',
+        description='Launch joystick teleop for manual mapping (publishes /cmd_vel)')
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz', default_value='True',
+        description='Launch RViz2 for visualization')
     slam_params_arg = DeclareLaunchArgument(
         'slam_params_file', default_value='',
         description='SLAM params file (empty = auto-select by profile)')
@@ -69,11 +82,17 @@ def generate_launch_description():
     respawn_arg = DeclareLaunchArgument(
         'use_respawn', default_value='True',
         description='Enable automatic respawn of crashed nodes')
+    namespace_arg = DeclareLaunchArgument(
+        'namespace', default_value='',
+        description='Robot namespace for multi-vehicle support (e.g. c30_1)')
 
     def launch_setup(context):
         profile = LaunchConfiguration('hardware_profile').perform(context)
         use_respawn = LaunchConfiguration('use_respawn')
         use_teleop_str = LaunchConfiguration('use_teleop').perform(context)
+        use_joystick_str = LaunchConfiguration('use_joystick').perform(context)
+        use_rviz_str = LaunchConfiguration('use_rviz').perform(context)
+        vehicle_namespace = LaunchConfiguration('namespace').perform(context)
 
         # Load profile config
         profile_cfg = load_profile_yaml(profile, project_dir)
@@ -126,6 +145,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -136,6 +156,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -146,6 +167,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -156,6 +178,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim_time': str(use_sim_time).lower(),
                 'use_respawn': 'True',
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -182,6 +205,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{'use_sim_time': use_sim_time}],
             arguments=['-d', rviz_config],
+            condition=IfCondition(
+                PythonExpression(["'", use_rviz_str, "' == 'True'"])),
         )
 
         actions.extend([watchdog, rviz2])
@@ -196,7 +221,7 @@ def generate_launch_description():
             executable='wait_for_topic',
             output='screen',
             parameters=[{
-                'topic_name': '/scan',
+                'topic_name': 'scan',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,
@@ -241,7 +266,7 @@ def generate_launch_description():
             parameters=[{
                 'base_frame_id': base_frame,
                 'odom_frame_id': odom_frame,
-                'laser_scan_topic': '/scan',
+                'laser_scan_topic': 'scan',
                 'init_pose_from_topic': '',
                 'use_sim_time': use_sim_time,
             }],
@@ -285,14 +310,17 @@ def generate_launch_description():
             }],
         )
 
+        # Use custom slam_toolbox launch with remappings for absolute topic names.
+        # Pass namespace directly — the custom launch sets it on the LifecycleNode.
+        # chain_slam is placed OUTSIDE the outer GroupAction to prevent
+        # PushRosNamespace from stacking with the LifecycleNode's own namespace.
         slam_toolbox = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource([
-                os.path.join(FindPackageShare('slam_toolbox').find('slam_toolbox'),
-                             'launch', 'online_async_launch.py')
-            ]),
+            PythonLaunchDescriptionSource(
+                os.path.join(project_dir, 'launch', 'slam_toolbox_namespaced.py')),
             launch_arguments={
                 'slam_params_file': slam_params,
                 'use_sim_time': str(use_sim_time).lower(),
+                'namespace': vehicle_namespace,
             }.items(),
         )
 
@@ -340,6 +368,36 @@ def generate_launch_description():
                 PythonExpression(["'", use_teleop_str, "' == 'True'"])),
         )
 
+        # Joystick teleop: joy_node + teleop_twist_joy_node → /cmd_vel
+        joystick_config = os.path.join(project_dir, 'config', 'joystick_c30.yaml')
+
+        joy_node = Node(
+            package='joy',
+            executable='joy_node',
+            name='joy_node',
+            output='screen',
+            parameters=[{
+                'device_id': 0,
+                'deadzone': 0.3,
+                'autorepeat_rate': 20.0,
+                'use_sim_time': use_sim_time,
+            }],
+            condition=IfCondition(
+                PythonExpression(["'", use_joystick_str, "' == 'True'"])),
+        )
+
+        teleop_joystick = Node(
+            package='teleop_twist_joy',
+            executable='teleop_node',
+            name='teleop_twist_joy_node',
+            output='screen',
+            parameters=[joystick_config, {
+                'use_sim_time': use_sim_time,
+            }],
+            condition=IfCondition(
+                PythonExpression(["'", use_joystick_str, "' == 'True'"])),
+        )
+
         # =====================================================================
         # Event-driven startup chains
         # =====================================================================
@@ -361,45 +419,64 @@ def generate_launch_description():
         actions.remove(rf2o)
         actions.remove(scan_filter)
 
+        # Helper: wrap actions in GroupAction with namespace so that
+        # event-triggered nodes also inherit PushRosNamespace.
+        def ns_wrap(*acts):
+            return GroupAction(actions=[PushRosNamespace(vehicle_namespace), *acts])
+
         chain_sensing = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_scan,
-                on_exit=[scan_filter, ekf, rf2o, wait_odom_tf],
+                on_exit=[ns_wrap(scan_filter, ekf, rf2o, wait_odom_tf)],
             )
         )
 
         # Chain 2: odom→base TF ready → SLAM
+        # slam_toolbox uses custom launch with remappings; namespace comes from
+        # the parent's PushRosNamespace. Do NOT wrap in ns_wrap.
         chain_slam = RegisterEventHandler(
             OnProcessExit(
                 target_action=wait_odom_tf,
-                on_exit=[slam_toolbox, lifecycle_starter_slam],
+                on_exit=[
+                    slam_toolbox,
+                    ns_wrap(lifecycle_starter_slam),
+                ],
             )
         )
 
         # Chain 3: SLAM ready → teleop (delay slightly for slam to stabilize)
-        # teleop can start immediately after slam, no strict dependency
-        # Just add teleop after slam_toolbox via timer
         from launch.actions import TimerAction
         teleop_delayed = TimerAction(
             period=3.0,
-            actions=[teleop],
+            actions=[ns_wrap(teleop, joy_node, teleop_joystick)],
         )
 
         actions.extend([
             chain_sensing,
-            chain_slam,
             teleop_delayed,
         ])
 
-        return actions
+        # Wrap most actions in GroupAction with namespace.
+        # chain_slam is placed OUTSIDE because slam_toolbox sets namespace
+        # directly on its LifecycleNode; PushRosNamespace would double it.
+        return [
+            GroupAction(actions=[
+                PushRosNamespace(vehicle_namespace),
+                *actions,
+            ]),
+            chain_slam,
+        ]
 
     return LaunchDescription([
         # Arguments
         profile_arg,
         use_teleop_arg,
+        use_joystick_arg,
+        use_rviz_arg,
         slam_params_arg,
         rviz_config_arg,
         respawn_arg,
+        namespace_arg,
         # Opaque function for runtime profile evaluation
         OpaqueFunction(function=launch_setup),
     ])

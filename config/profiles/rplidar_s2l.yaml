@@ -4,6 +4,7 @@
 
 hardware_profile: "rplidar_s2l"
 use_sim_time: false
+domain_id: 30
 
 chassis:
   type: "none"

@@ -27,7 +27,7 @@ class MapSaverWatcher(Node):
         )
         self.create_subscription(
             ExploreStatus,
-            '/explore/status',
+            'explore/status',
             self._status_cb,
             10,
         )

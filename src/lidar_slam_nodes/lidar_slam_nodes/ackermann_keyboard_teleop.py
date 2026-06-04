@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ackermann keyboard teleop publishing /steering_angle and /velocity (Float64).
+"""Ackermann keyboard teleop publishing steering_angle and velocity (Float64).
 
 Uses select-based non-blocking keyboard reads.
 """
@@ -67,8 +67,8 @@ def main():
     speed = node.declare_parameter('speed', 1.0).value
     steer = node.declare_parameter('steer', 0.3).value
 
-    pub_steer = node.create_publisher(Float64, '/steering_angle', 10)
-    pub_vel = node.create_publisher(Float64, '/velocity', 10)
+    pub_steer = node.create_publisher(Float64, 'steering_angle', 10)
+    pub_vel = node.create_publisher(Float64, 'velocity', 10)
 
     lin = 0.0
     ang = 0.0

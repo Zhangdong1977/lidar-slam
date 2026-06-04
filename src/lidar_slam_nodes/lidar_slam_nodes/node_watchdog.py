@@ -39,9 +39,9 @@ class NodeWatchdog(Node):
         ])
         self.declare_parameter('non_critical_nodes', ['rviz2', 'material_action_gui'])
         self.declare_parameter('critical_topics', [
-            '/scan', '/odom', '/tf', '/cmd_vel', '/amcl_pose',
+            'scan', 'odom', 'tf', 'cmd_vel', 'amcl_pose',
         ])
-        self.declare_parameter('non_critical_topics', ['/route_graph/markers'])
+        self.declare_parameter('non_critical_topics', ['route_graph/markers'])
 
         self._check_period = self.get_parameter('check_period').value
         self._topic_timeout = self.get_parameter('topic_timeout').value
@@ -77,9 +77,9 @@ class NodeWatchdog(Node):
             reliability=ReliabilityPolicy.RELIABLE,
         )
         self._diag_pub = self.create_publisher(
-            DiagnosticArray, '/system_health', diag_qos)
+            DiagnosticArray, 'system_health', diag_qos)
         self._summary_pub = self.create_publisher(
-            String, '/system_health_summary', 10)
+            String, 'system_health_summary', 10)
 
         # Check timer
         self._timer = self.create_timer(self._check_period, self._check_health)
