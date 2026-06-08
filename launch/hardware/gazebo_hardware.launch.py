@@ -66,7 +66,8 @@ def launch_setup(context):
 
     # Resolve substitutions eagerly — chain nodes (RegisterEventHandler → OnProcessExit)
     # execute outside the GroupAction context, where LaunchConfiguration lookups fail.
-    use_sim_time = LaunchConfiguration('use_sim_time').perform(context) == 'True'
+    use_sim_time = LaunchConfiguration('use_sim_time').perform(context).lower() in (
+        'true', '1', 'yes')
     use_respawn = LaunchConfiguration('use_respawn').perform(context).lower() in ('true', '1', 'yes')
 
     # Use namespace as Gazebo model name; fallback for single-vehicle (no namespace)
@@ -254,6 +255,7 @@ def launch_setup(context):
         output='screen',
         parameters=[{
             'topic_name': 'joint_states',
+            'topic_type': 'sensor_msgs/msg/JointState',
             'min_publishers': 1,
             'timeout': 30.0,
             'exit_on_timeout': False,

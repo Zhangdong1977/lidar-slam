@@ -8,9 +8,9 @@
 ## 1. 启动命令
 
 ```bash
-bash scripts/launch/dispatch.sh                              # 默认 gazebo 仿真，namespace=gazebo_1
-bash scripts/launch/dispatch.sh --namespace gazebo_2 --skip-cleanup --no-gazebo  # 第二辆车，复用已有 Gazebo
-bash scripts/launch/dispatch.sh --no-rviz                    # 不启动 RViz
+bash scripts/launch/dispatch.sh --discovery-address <sidecar_ip>  # 默认 gazebo 仿真，namespace=gazebo_1
+bash scripts/launch/dispatch.sh --namespace gazebo_2 --skip-cleanup --no-gazebo --discovery-address <sidecar_ip>  # 第二辆车，复用已有 Gazebo
+bash scripts/launch/dispatch.sh --no-rviz --discovery-address <sidecar_ip>  # 不启动 RViz
 ```
 
 ---
@@ -340,10 +340,10 @@ map ──(AMCL)──> odom ──(EKF)──> body_link ──(static TF)─�
 
 ```bash
 # 车辆 1
-bash scripts/launch/dispatch.sh --namespace gazebo_1
+bash scripts/launch/dispatch.sh --namespace gazebo_1 --discovery-address <sidecar_ip>
 
 # 车辆 2（另一个终端）
-bash scripts/launch/dispatch.sh --namespace gazebo_2 --skip-cleanup --no-gazebo
+bash scripts/launch/dispatch.sh --namespace gazebo_2 --skip-cleanup --no-gazebo --discovery-address <sidecar_ip>
 ```
 
 所有节点、话题、Action 会自动使用对应 namespace 前缀。

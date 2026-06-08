@@ -91,7 +91,8 @@ def generate_launch_description():
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=remappings,
             ),
-            # AMCL: remap initialpose to /{vehicle_name}/initialpose
+            # AMCL publishes to an internal topic. opentcs_vehicle_node republishes
+            # /{vehicle_name}/amcl_pose for sidecar consumers.
             Node(
                 package='nav2_amcl',
                 executable='amcl',
@@ -103,6 +104,7 @@ def generate_launch_description():
                 arguments=['--ros-args', '--log-level', log_level],
                 remappings=remappings + [
                     ('initialpose', 'initialpose'),
+                    ('amcl_pose', 'amcl_pose_raw'),
                 ],
             ),
             # KEY FIX: lifecycle_manager receives configured_params (from yaml)

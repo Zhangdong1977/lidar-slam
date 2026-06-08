@@ -479,7 +479,7 @@ GroupAction(PushRosNamespace(namespace))  ← 所有节点在 namespace 内
 
 ### 7.2 统一启动脚本
 
-所有场景通过统一的 shell 脚本入口，`--profile` 参数选择硬件配置，`--domain-id` 覆盖 DDS 域，`--namespace` 设置多车命名空间：
+所有场景通过统一的 shell 脚本入口，`--profile` 参数选择硬件配置，`--domain-id` 覆盖 DDS 域，`--namespace` 设置多车命名空间。调度集成场景使用 sidecar 端提供的 Discovery Server，车辆端通过 `--discovery-address <sidecar_ip>` 连接：
 
 ```bash
 # ── 场景1: 手工建图 ──────────────────────────────────────────
@@ -496,12 +496,12 @@ GroupAction(PushRosNamespace(namespace))  ← 所有节点在 namespace 内
 ./scripts/launch/explore.sh --profile raspberry         # 树莓派
 
 # ── 场景3: 调度集成 ─────────────────────────────────────────
-./scripts/launch/dispatch.sh                            # gazebo 仿真 (默认)
-./scripts/launch/dispatch.sh --profile rs485            # RS-485 实车
-./scripts/launch/dispatch.sh --profile raspberry        # 树莓派
-./scripts/launch/dispatch.sh --map /path/to/map.yaml    # 指定地图
-./scripts/launch/dispatch.sh --namespace c30_1          # 多车 namespace
-./scripts/launch/dispatch.sh --profile raspberry --namespace c30_1 --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --discovery-address <sidecar_ip>  # gazebo 仿真 (默认)
+./scripts/launch/dispatch.sh --profile rs485 --discovery-address <sidecar_ip>
+./scripts/launch/dispatch.sh --profile raspberry --discovery-address <sidecar_ip>
+./scripts/launch/dispatch.sh --map /path/to/map.yaml --discovery-address <sidecar_ip>
+./scripts/launch/dispatch.sh --namespace c30_1 --discovery-address <sidecar_ip>
+./scripts/launch/dispatch.sh --profile raspberry --namespace c30_1 --map maps/my_map.yaml --discovery-address <sidecar_ip>
 
 # ── 辅助工具 ────────────────────────────────────────────────
 ./scripts/launch/save_map.sh -f maps/my_map             # 保存地图
@@ -515,15 +515,15 @@ GroupAction(PushRosNamespace(namespace))  ← 所有节点在 namespace 内
 |---|---|---|---|---|
 | **手工建图** | `slam.sh` | `slam.sh --profile rs485` | `slam.sh --profile raspberry` | `slam.sh --profile rplidar_s2l` |
 | **自动探索** | `explore.sh` | `explore.sh --profile rs485` | `explore.sh --profile raspberry` | — |
-| **调度集成** | `dispatch.sh` | `dispatch.sh --profile rs485` | `dispatch.sh --profile raspberry` | — |
-| **多车调度** | — | `dispatch.sh --namespace c30_1` | `dispatch.sh --profile raspberry --namespace c30_1` | — |
+| **调度集成** | `dispatch.sh --discovery-address <sidecar_ip>` | `dispatch.sh --profile rs485 --discovery-address <sidecar_ip>` | `dispatch.sh --profile raspberry --discovery-address <sidecar_ip>` | — |
+| **多车调度** | — | `dispatch.sh --namespace c30_1 --discovery-address <sidecar_ip>` | `dispatch.sh --profile raspberry --namespace c30_1 --discovery-address <sidecar_ip>` | — |
 
 ### 7.4 推荐使用流程
 
 1. **建图阶段**: `./scripts/launch/slam.sh` (手动遥控) 或 `./scripts/launch/explore.sh` (自动探索)
 2. **保存地图**: `./scripts/launch/save_map.sh -f maps/my_map`
-3. **单车调度**: `./scripts/launch/dispatch.sh --map maps/my_map.yaml`
-4. **多车调度**: 每台 Pi 执行 `./scripts/launch/dispatch.sh --profile raspberry --namespace c30_N --map maps/my_map.yaml`
+3. **单车调度**: `./scripts/launch/dispatch.sh --map maps/my_map.yaml --discovery-address <sidecar_ip>`
+4. **多车调度**: 每台 Pi 执行 `./scripts/launch/dispatch.sh --profile raspberry --namespace c30_N --map maps/my_map.yaml --discovery-address <sidecar_ip>`
 5. **openTCS 调度**: 另开终端启动 openTCS Kernel + PlantOverview
 
 ---
@@ -708,7 +708,7 @@ lidar-slam/
 │   ├── launch/                          # ── 统一启动脚本 ──
 │   │   ├── slam.sh                     ★ 手工建图 (--profile, --domain-id)
 │   │   ├── explore.sh                  ★ 自动探索建图
-│   │   ├── dispatch.sh                 ★ 调度集成 (--profile, --namespace, --domain-id)
+│   │   ├── dispatch.sh                 ★ 调度集成 (--profile, --namespace, --domain-id, --discovery-address)
 │   │   ├── save_map.sh                 ★ 保存地图
 │   │   ├── teleop.sh                   ★ 键盘遥控 (--domain-id)
 │   │   ├── view_tf_tree.sh             # TF 树查看
@@ -788,7 +788,7 @@ colcon build --symlink-install
 ./scripts/launch/explore.sh
 
 # 调度集成 (仿真)
-./scripts/launch/dispatch.sh --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --map maps/my_map.yaml --discovery-address <sidecar_ip>
 ```
 
 ### 13.2 树莓派小车
@@ -806,13 +806,13 @@ colcon build --symlink-install --parallel-workers 3
 ./scripts/launch/slam.sh --profile raspberry
 
 # 单车调度 (树莓派)
-./scripts/launch/dispatch.sh --profile raspberry --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --profile raspberry --map maps/my_map.yaml --discovery-address <sidecar_ip>
 
 # 多车调度 — Pi 1
-./scripts/launch/dispatch.sh --profile raspberry --namespace c30_1 --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --profile raspberry --namespace c30_1 --map maps/my_map.yaml --discovery-address <sidecar_ip>
 
 # 多车调度 — Pi 2
-./scripts/launch/dispatch.sh --profile raspberry --namespace c30_2 --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --profile raspberry --namespace c30_2 --map maps/my_map.yaml --discovery-address <sidecar_ip>
 
 # 环境变量已在 ~/.bashrc 中配置:
 #   LIDAR_SLAM_ROOT=/home/pi/lidar-slam
@@ -828,10 +828,10 @@ colcon build --symlink-install --parallel-workers 3
 ls /dev/ttyUSB0 /dev/ttyUSB1
 
 # 调度集成 (RS-485)
-./scripts/launch/dispatch.sh --profile rs485 --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --profile rs485 --map maps/my_map.yaml --discovery-address <sidecar_ip>
 
 # 多车调度
-./scripts/launch/dispatch.sh --profile rs485 --namespace c30_1 --map maps/my_map.yaml
+./scripts/launch/dispatch.sh --profile rs485 --namespace c30_1 --map maps/my_map.yaml --discovery-address <sidecar_ip>
 ```
 
 ### 13.4 纯激光雷达建图

@@ -142,7 +142,7 @@ echo "  日志:    ${LOG_FILE}"
 echo "============================================="
 
 # ── 清理残留 ──────────────────────────────────────────────────────
-bash "${PROJECT_DIR}/scripts/tools/cleanup_ros2.sh"
+bash "${PROJECT_DIR}/scripts/launch/cleanup_ros2.sh"
 
 # ── 构建 launch 参数 ──────────────────────────────────────────────
 LAUNCH_ARGS="hardware_profile:=${PROFILE} use_teleop:=${USE_TELEOP} use_joystick:=${USE_JOYSTICK} use_rviz:=${USE_RVIZ}"

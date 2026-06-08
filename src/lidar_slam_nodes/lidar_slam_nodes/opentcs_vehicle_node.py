@@ -191,9 +191,9 @@ class OpentcsVehicleNode(LifecycleNode):
         self._angular_velocity = 0.0
 
         # AMCL covariance for localization quality
-        self._amcl_cov_x = 1.0
-        self._amcl_cov_y = 1.0
-        self._amcl_cov_yaw = 1.0
+        self._amcl_cov_x = 0.25
+        self._amcl_cov_y = 0.25
+        self._amcl_cov_yaw = 0.15
 
         # Battery simulation
         self._battery_sim = battery_sim
@@ -878,9 +878,7 @@ class OpentcsVehicleNode(LifecycleNode):
         self._amcl_pub.publish(msg)
 
     def _publish_robot_state(self):
-        now = self.get_clock().now()
-        sec, nsec = now.seconds_nanoseconds()
-        timestamp = sec + nsec * 1e-9
+        timestamp = int(time.time())
 
         state_dict = {
             'vehicleName': self._vehicle_name,

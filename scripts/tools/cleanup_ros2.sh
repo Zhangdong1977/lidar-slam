@@ -69,6 +69,7 @@ echo -n "Sending SIGTERM to all ROS/Gazebo processes... "
 # ROS2 daemon
 pk pkill -f "ros2-daemon" 2>/dev/null || true
 pk pkill -f "ros2cli.daemon" 2>/dev/null || true
+# Discovery Server is owned by the sidecar side. Do not kill it from vehicle cleanup.
 
 # Workspace nodes (matched by install path)
 pk pkill -f "${WORKSPACE}/install/" 2>/dev/null || true

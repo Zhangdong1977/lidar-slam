@@ -13,7 +13,13 @@ def main():
 
     # Accept gazebo_model_name parameter for multi-vehicle support
     node.declare_parameter('gazebo_model_name', 'ackermann_robot')
+    node.declare_parameter('load_timeout', 30.0)
+    node.declare_parameter('configure_timeout', 15.0)
+    node.declare_parameter('switch_timeout', 15.0)
     gazebo_model_name = node.get_parameter('gazebo_model_name').value
+    load_timeout = node.get_parameter('load_timeout').value
+    configure_timeout = node.get_parameter('configure_timeout').value
+    switch_timeout = node.get_parameter('switch_timeout').value
 
     controllers = [
         'joint_state_broadcaster',
@@ -69,11 +75,12 @@ def main():
         req = LoadController.Request()
         req.name = ctrl
         future = load_srv.call_async(req)
-        rclpy.spin_until_future_complete(node, future, timeout_sec=5.0)
+        rclpy.spin_until_future_complete(node, future, timeout_sec=load_timeout)
         if future.result() is None:
-            node.get_logger().error(f'Timeout loading {ctrl}')
-            continue
-        if not future.result().ok:
+            node.get_logger().error(
+                f'Timeout loading {ctrl} after {load_timeout}s; '
+                'trying configure anyway in case the controller loaded late')
+        elif not future.result().ok:
             node.get_logger().warn(f'Load {ctrl} returned not ok')
         else:
             node.get_logger().info(f'Loaded {ctrl}')
@@ -81,9 +88,11 @@ def main():
         req2 = ConfigureController.Request()
         req2.name = ctrl
         future2 = config_srv.call_async(req2)
-        rclpy.spin_until_future_complete(node, future2, timeout_sec=5.0)
+        rclpy.spin_until_future_complete(
+            node, future2, timeout_sec=configure_timeout)
         if future2.result() is None:
-            node.get_logger().error(f'Timeout configuring {ctrl}')
+            node.get_logger().error(
+                f'Timeout configuring {ctrl} after {configure_timeout}s')
             continue
         if not future2.result().ok:
             node.get_logger().warn(f'Configure {ctrl} returned not ok')
@@ -100,9 +109,10 @@ def main():
     req3.timeout.nanosec = 0
 
     future3 = switch_srv.call_async(req3)
-    rclpy.spin_until_future_complete(node, future3, timeout_sec=10.0)
+    rclpy.spin_until_future_complete(node, future3, timeout_sec=switch_timeout)
     if future3.result() is None:
-        node.get_logger().error('Timeout switching controllers')
+        node.get_logger().error(
+            f'Timeout switching controllers after {switch_timeout}s')
     elif not future3.result().ok:
         node.get_logger().warn(f'Switch controllers returned not ok')
     else:

@@ -38,6 +38,7 @@ setup(
             'node_watchdog = lidar_slam_nodes.node_watchdog:main',
             'lifecycle_starter = lidar_slam_nodes.lifecycle_starter:main',
             'battery_bridge = lidar_slam_nodes.battery_bridge:main',
+            'rviz_tf_bridge = lidar_slam_nodes.rviz_tf_bridge:main',
         ],
     },
 )

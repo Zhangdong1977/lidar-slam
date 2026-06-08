@@ -230,6 +230,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'topic_name': 'scan',
+                'topic_type': 'sensor_msgs/msg/LaserScan',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'use_sim_time': use_sim_time,

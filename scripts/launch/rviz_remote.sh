@@ -11,6 +11,7 @@
 #   ./scripts/launch/rviz_remote.sh --config /path/to/slam.rviz
 #   ./scripts/launch/rviz_remote.sh --profile raspberry    # 自动从 profile 读取 domain_id
 #   ./scripts/launch/rviz_remote.sh --config config/nav_multi.rviz  # 多车导航可视化
+#   ./scripts/launch/rviz_remote.sh --discovery-address 192.168.10.10
 # ─────────────────────────────────────────────────────────────────────
 
 set -e
@@ -20,6 +21,9 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 DOMAIN_ID=""
 RVIZ_CONFIG=""
+USE_DISCOVERY_SERVER="True"
+DISCOVERY_SERVER_ADDRESS=""
+DISCOVERY_SERVER_PORT="11811"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -37,9 +41,21 @@ while [[ $# -gt 0 ]]; do
             DOMAIN_ID="${DOMAIN_ID:-$DEFAULT_DOMAIN}"
             shift 2
             ;;
+        --discovery-address)
+            DISCOVERY_SERVER_ADDRESS="$2"
+            shift 2
+            ;;
+        --discovery-port)
+            DISCOVERY_SERVER_PORT="$2"
+            shift 2
+            ;;
+        --no-discovery-server)
+            USE_DISCOVERY_SERVER="False"
+            shift
+            ;;
         *)
             echo "未知参数: $1"
-            echo "用法: $0 [--domain-id ID] [--config FILE] [--profile NAME]"
+            echo "用法: $0 [--domain-id ID] [--config FILE] [--profile NAME] [--discovery-address HOST] [--discovery-port PORT] [--no-discovery-server]"
             exit 1
             ;;
     esac
@@ -61,12 +77,24 @@ source "${PROJECT_DIR}/install/setup.bash" 2>/dev/null || true
 export ROS_DOMAIN_ID="$DOMAIN_ID"
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 unset ROS_LOCALHOST_ONLY
-unset ROS_DISCOVERY_SERVER
+
+if [ "$USE_DISCOVERY_SERVER" = "True" ]; then
+    if [ -n "$DISCOVERY_SERVER_ADDRESS" ]; then
+        if [[ "$DISCOVERY_SERVER_ADDRESS" == *":"* || "$DISCOVERY_SERVER_ADDRESS" == *";"* ]]; then
+            export ROS_DISCOVERY_SERVER="$DISCOVERY_SERVER_ADDRESS"
+        else
+            export ROS_DISCOVERY_SERVER="${DISCOVERY_SERVER_ADDRESS}:${DISCOVERY_SERVER_PORT}"
+        fi
+    fi
+else
+    unset ROS_DISCOVERY_SERVER
+fi
 
 echo "============================================="
 echo "  远程 RViz"
 echo "  Domain ID:  $ROS_DOMAIN_ID"
 echo "  RMW:        $RMW_IMPLEMENTATION"
+echo "  DDS发现:    ${ROS_DISCOVERY_SERVER:-multicast}"
 echo "  Config:     $RVIZ_CONFIG"
 echo "============================================="
 echo ""

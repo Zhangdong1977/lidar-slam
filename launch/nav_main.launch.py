@@ -258,6 +258,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'topic_name': 'scan',
+                'topic_type': 'sensor_msgs/msg/LaserScan',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'exit_on_timeout': False,
@@ -324,6 +325,10 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'topic_name': 'map',
+                'topic_type': 'nav_msgs/msg/OccupancyGrid',
+                'qos_depth': 1,
+                'qos_reliability': 'reliable',
+                'qos_durability': 'transient_local',
                 'min_publishers': 1,
                 'timeout': 30.0,
                 'exit_on_timeout': False,
@@ -388,6 +393,7 @@ def generate_launch_description():
                 'vehicle_name': LaunchConfiguration('vehicle_name'),
                 'namespace': vehicle_namespace,
                 'base_frame': base_frame,
+                'amcl_subscribe_topic': 'amcl_pose_raw',
             }],
             remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
             respawn=use_respawn,
