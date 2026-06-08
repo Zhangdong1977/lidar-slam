@@ -24,6 +24,7 @@ Usage:
 
 import os
 
+import yaml
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -48,11 +49,20 @@ from lifecycle_msgs.msg import Transition
 
 def load_profile_yaml(profile_name_str, project_dir):
     """Load profile config yaml as dict."""
-    import yaml
     path = os.path.join(project_dir, 'config', 'profiles', f'{profile_name_str}.yaml')
     if os.path.exists(path):
         with open(path, 'r') as f:
             return yaml.safe_load(f)
+    return {}
+
+
+def _load_params(yaml_path):
+    """Load ros__parameters from YAML, bypassing node-name key matching."""
+    with open(yaml_path) as f:
+        doc = yaml.safe_load(f)
+    for v in doc.values():
+        if isinstance(v, dict) and 'ros__parameters' in v:
+            return v['ros__parameters']
     return {}
 
 
@@ -139,7 +149,7 @@ def generate_launch_description():
                 'rs485_chassis_receiver', 'vehicle_controller'])
 
         # Build EKF parameters with profile overrides
-        ekf_params = [ekf_config, {
+        ekf_params = [_load_params(ekf_config), {
             'use_sim_time': use_sim_time,
             'odom_frame': odom_frame,
             'base_link_frame': base_frame,
@@ -251,6 +261,7 @@ def generate_launch_description():
             name='ekf_filter_node',
             output='screen',
             parameters=ekf_params,
+            remappings=[('/tf', 'tf'), ('/tf_static', 'tf_static')],
             respawn=use_respawn,
             respawn_delay=2.0,
         )

@@ -24,11 +24,13 @@ Usage (from parent launch):
 
 import os
 
+import yaml
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     EmitEvent,
     LogInfo,
+    OpaqueFunction,
     RegisterEventHandler,
 )
 from launch.conditions import IfCondition
@@ -44,11 +46,34 @@ from launch_ros.events.lifecycle import ChangeState
 from lifecycle_msgs.msg import Transition
 
 
+def _load_params(yaml_path):
+    """Load ros__parameters from YAML, bypassing node-name key matching.
+
+    ROS2 Jazzy matches YAML keys against the fully qualified node name.
+    A key like ``slam_toolbox:`` only matches ``/slam_toolbox`` (root namespace),
+    not ``/c30_1/slam_toolbox`` (sub-namespace).  This helper extracts the
+    ``ros__parameters`` dict regardless of the top-level key so that
+    parameters work under any namespace.
+    """
+    if not yaml_path or not os.path.isfile(yaml_path):
+        return {}
+    with open(yaml_path) as f:
+        doc = yaml.safe_load(f)
+    if not doc:
+        return {}
+    for v in doc.values():
+        if isinstance(v, dict) and 'ros__parameters' in v:
+            return v['ros__parameters']
+    return {}
+
+
 def generate_launch_description():
+
     autostart = LaunchConfiguration('autostart')
     use_lifecycle_manager = LaunchConfiguration('use_lifecycle_manager')
     use_sim_time = LaunchConfiguration('use_sim_time')
     slam_params_file = LaunchConfiguration('slam_params_file')
+
     declare_autostart_cmd = DeclareLaunchArgument(
         'autostart', default_value='true',
         description='Automatically startup the slamtoolbox. '
@@ -74,59 +99,65 @@ def generate_launch_description():
     declare_namespace_cmd = DeclareLaunchArgument(
         'namespace', default_value='',
         description='Robot namespace for multi-vehicle support')
-    start_async_slam_toolbox_node = LifecycleNode(
-        parameters=[
-            slam_params_file,
-            {
-                'use_lifecycle_manager': use_lifecycle_manager,
-                'use_sim_time': use_sim_time,
-            },
-        ],
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        namespace=namespace,
-        output='screen',
-        remappings=[
-            ('/map', 'map'),
-            ('/map_metadata', 'map_metadata'),
-            ('/scan', 'scan'),
-            ('/tf', 'tf'),
-            ('/tf_static', 'tf_static'),
-        ],
-    )
 
-    configure_event = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=matches_action(
-                start_async_slam_toolbox_node),
-            transition_id=Transition.TRANSITION_CONFIGURE,
-        ),
-        condition=IfCondition(
-            AndSubstitution(autostart,
-                            NotSubstitution(use_lifecycle_manager))),
-    )
+    def make_slam_node(context):
+        """Resolve slam_params_file at launch time and parse YAML as dict."""
+        params_path = slam_params_file.perform(context)
+        slam_yaml_params = _load_params(params_path)
 
-    activate_event = RegisterEventHandler(
-        OnStateTransition(
-            target_lifecycle_node=start_async_slam_toolbox_node,
-            start_state='configuring',
-            goal_state='inactive',
-            entities=[
-                LogInfo(
-                    msg='[LifecycleLaunch] Slamtoolbox node is activating.'),
-                EmitEvent(
-                    event=ChangeState(
-                        lifecycle_node_matcher=matches_action(
-                            start_async_slam_toolbox_node),
-                        transition_id=Transition.TRANSITION_ACTIVATE,
-                    )),
+        node = LifecycleNode(
+            parameters=[
+                slam_yaml_params,
+                {
+                    'use_lifecycle_manager': use_lifecycle_manager,
+                    'use_sim_time': use_sim_time,
+                },
             ],
-        ),
-        condition=IfCondition(
-            AndSubstitution(autostart,
-                            NotSubstitution(use_lifecycle_manager))),
-    )
+            package='slam_toolbox',
+            executable='async_slam_toolbox_node',
+            name='slam_toolbox',
+            namespace=namespace,
+            output='screen',
+            remappings=[
+                ('/map', 'map'),
+                ('/map_metadata', 'map_metadata'),
+                ('/scan', 'scan'),
+                ('/tf', 'tf'),
+                ('/tf_static', 'tf_static'),
+            ],
+        )
+
+        configure_event = EmitEvent(
+            event=ChangeState(
+                lifecycle_node_matcher=matches_action(node),
+                transition_id=Transition.TRANSITION_CONFIGURE,
+            ),
+            condition=IfCondition(
+                AndSubstitution(autostart,
+                                NotSubstitution(use_lifecycle_manager))),
+        )
+
+        activate_event = RegisterEventHandler(
+            OnStateTransition(
+                target_lifecycle_node=node,
+                start_state='configuring',
+                goal_state='inactive',
+                entities=[
+                    LogInfo(
+                        msg='[LifecycleLaunch] Slamtoolbox node is activating.'),
+                    EmitEvent(
+                        event=ChangeState(
+                            lifecycle_node_matcher=matches_action(node),
+                            transition_id=Transition.TRANSITION_ACTIVATE,
+                        )),
+                ],
+            ),
+            condition=IfCondition(
+                AndSubstitution(autostart,
+                                NotSubstitution(use_lifecycle_manager))),
+        )
+
+        return [node, configure_event, activate_event]
 
     ld = LaunchDescription()
 
@@ -135,8 +166,6 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_argument)
     ld.add_action(declare_slam_params_file_cmd)
     ld.add_action(declare_namespace_cmd)
-    ld.add_action(start_async_slam_toolbox_node)
-    ld.add_action(configure_event)
-    ld.add_action(activate_event)
+    ld.add_action(OpaqueFunction(function=make_slam_node))
 
     return ld

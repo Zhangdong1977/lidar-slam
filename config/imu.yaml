@@ -2,7 +2,7 @@
 # Reference: vendor's car_base/config/imu.yaml
 # Filters /imu/data_raw -> /imu/data for EKF fusion
 
-imu_filter_madgwick:
+imu_filter:
   ros__parameters:
     fixed_frame: "base_link"
     use_mag: false

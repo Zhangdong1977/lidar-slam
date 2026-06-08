@@ -19,10 +19,28 @@ Launch arguments:
 
 import os
 
+import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+def _load_params(yaml_path):
+    """Load ros__parameters from YAML, bypassing node-name key matching.
+
+    ROS2 Jazzy matches YAML keys against the fully qualified node name.
+    A key like ``imu_filter:`` only matches ``/imu_filter`` (root namespace),
+    not ``/c30_1/imu_filter`` (sub-namespace).  This helper extracts the
+    ``ros__parameters`` dict regardless of the top-level key so that
+    parameters work under any namespace.
+    """
+    with open(yaml_path) as f:
+        doc = yaml.safe_load(f)
+    for v in doc.values():
+        if isinstance(v, dict) and 'ros__parameters' in v:
+            return v['ros__parameters']
+    return {}
 
 
 def generate_launch_description():
@@ -118,10 +136,12 @@ def generate_launch_description():
         executable='imu_filter_madgwick_node',
         name='imu_filter',
         output='screen',
-        parameters=[imu_config, {'use_sim_time': use_sim_time}],
+        parameters=[_load_params(imu_config), {'use_sim_time': use_sim_time}],
         remappings=[
             ('/imu/data_raw', 'imu/data_raw'),
             ('/imu/data', 'imu/data'),
+            ('/tf', 'tf'),
+            ('/tf_static', 'tf_static'),
         ],
     )
 
