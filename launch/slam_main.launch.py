@@ -257,12 +257,29 @@ def generate_launch_description():
         )
 
         # EKF: fuses /odom + /imu → refined odom→base TF
-        ekf_params = [_load_params(ekf_config), {
+        # When the IMU source reports un-bias-corrected angular_velocity
+        # (car_base_node on raspberry/rs485), disable vyaw fusion to avoid
+        # injecting gyro bias into the EKF state. The corrected orientation
+        # (yaw) is still fused.
+        imu_cfg = profile_cfg.get('sensors', {}).get('imu', {})
+        imu_angular_biased = imu_cfg.get('angular_velocity_biased', False)
+
+        ekf_override = {
             'use_sim_time': use_sim_time,
             'odom_frame': odom_frame,
             'base_link_frame': base_frame,
             'imu0': imu_topic,
-        }]
+        }
+        if imu_angular_biased:
+            ekf_override['imu0_config'] = [
+                False, False, False,     # x, y, z
+                False, False, True,      # roll, pitch, yaw (Mahony-corrected)
+                False, False, False,     # vx, vy, vz
+                False, False, False,     # vroll, vpitch, vyaw (disabled: bias)
+                False, False, False,     # ax, ay, az
+            ]
+
+        ekf_params = [_load_params(ekf_config), ekf_override]
 
         ekf = Node(
             package='robot_localization',

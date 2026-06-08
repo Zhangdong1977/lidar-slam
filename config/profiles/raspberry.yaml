@@ -22,8 +22,13 @@ sensors:
     baudrate: 460800
   imu:
     type: "car_base"
-    topic: "imu/data"
+    topic: "imu/data_raw"   # use car_base's internal Mahony output (bias-calibrated)
     frame: "imu_link"
+    # car_base_node publishes /imu/data_raw with bias-corrected orientation
+    # but raw (un-bias-corrected) angular_velocity (~25°/s gyro bias on X).
+    # When true, launch overrides ekf imu0_config to disable vyaw fusion.
+    # See config/ekf.yaml and ros2_ws/src/car_base/src/Quaternion_Solution.cpp
+    angular_velocity_biased: true
   odom:
     type: "car_base"
     topic: "odom"

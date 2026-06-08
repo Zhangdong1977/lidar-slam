@@ -148,6 +148,13 @@ def generate_launch_description():
 
         # --- Build EKF parameters with profile overrides ---
         # Pass the extracted ros__parameters directly so they apply under namespaces.
+        # When the IMU source reports un-bias-corrected angular_velocity
+        # (car_base_node on raspberry/rs485), disable vyaw fusion to avoid
+        # injecting gyro bias into the EKF state. The corrected orientation
+        # (yaw) is still fused.
+        imu_cfg = profile_cfg.get('sensors', {}).get('imu', {})
+        imu_angular_biased = imu_cfg.get('angular_velocity_biased', False)
+
         ekf_node_params = load_node_params_yaml(ekf_config, 'ekf_filter_node')
         ekf_node_params.update({
             'use_sim_time': use_sim_time,
@@ -156,6 +163,14 @@ def generate_launch_description():
             'odom0': odom_topic,
             'imu0': imu_topic,
         })
+        if imu_angular_biased:
+            ekf_node_params['imu0_config'] = [
+                False, False, False,     # x, y, z
+                False, False, True,      # roll, pitch, yaw (Mahony-corrected)
+                False, False, False,     # vx, vy, vz
+                False, False, False,     # vroll, vpitch, vyaw (disabled: bias)
+                False, False, False,     # ax, ay, az
+            ]
         ekf_params = [ekf_node_params]
 
         # --- Determine lifecycle_starter_custom node list ---

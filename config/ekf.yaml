@@ -38,6 +38,15 @@ ekf_filter_node:
 
     # ── IMU input (from imu_filter_madgwick_node, filtered) ──
     # Vendor fuses: yaw, vyaw in relative mode
+    #
+    # Profile override: if a profile sets
+    #   sensors.imu.angular_velocity_biased: true
+    # the launch file overrides imu0_config below to disable vyaw fusion.
+    # This is needed for car_base-sourced IMU (raspberry/rs485 profiles):
+    # /imu/data_raw.angular_velocity is NOT bias-corrected by the STM32 driver,
+    # while /imu/data_raw.orientation IS (Mahony filter in Quaternion_Solution.cpp
+    # does the calibration). Fusing the biased ω would inject drift into the
+    # EKF state; fusing the corrected orientation alone is sufficient.
     imu0: imu
     imu0_config: [false, false, false,     # x, y, z
                   false, false, true,      # roll, pitch, yaw
