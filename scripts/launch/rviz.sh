@@ -78,6 +78,9 @@ fi
 ROS_ARGS=()
 if [ -n "$NAMESPACE" ]; then
     ROS_ARGS+=(-r "__ns:=/${NAMESPACE}")
+    # rviz 内部 tf2_ros::TransformListener 创建的节点用绝对路径 /tf, /tf_static,
+    # 不遵守 __ns 命名空间。必须显式 remap 到相对路径，才能解析到 /<ns>/tf。
+    ROS_ARGS+=(-r "/tf:=tf" -r "/tf_static:=tf_static")
 fi
 ROS_ARGS+=(-p "use_sim_time:=false")
 
