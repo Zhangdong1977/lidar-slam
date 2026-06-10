@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- 仿真场景 sidecar 端 CycloneDDS 配置（交付给 sidecar 团队）。
+     sidecar（10.0.0.187）unicast peer 指向车端（10.0.0.60）。
+     sidecar 启动前设置:
+       export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+       export ROS_DOMAIN_ID=42
+       export CYCLONEDDS_URI=file://<此文件路径>
+       unset ROS_DISCOVERY_SERVER -->
+<cyclonedds xmlns="https://cdds.io/config">
+  <domain id="any">
+    <general><allowMulticast>false</allowMulticast></general>
+    <discovery>
+      <maxAutoParticipantIndex>200</maxAutoParticipantIndex>
+      <peers><peer address="127.0.0.1"/><peer address="10.0.0.60"/></peers>
+    </discovery>
+  </domain>
+</cyclonedds>

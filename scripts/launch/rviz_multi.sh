@@ -22,6 +22,7 @@ USE_TF_BRIDGE="True"
 USE_DISCOVERY_SERVER="True"
 DISCOVERY_SERVER_ADDRESS=""
 DISCOVERY_SERVER_PORT="11811"
+CYCLONE_PEERS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,6 +52,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --discovery-address)
             DISCOVERY_SERVER_ADDRESS="$2"
+            CYCLONE_PEERS+=("$2")
+            shift 2
+            ;;
+        --peer)
+            CYCLONE_PEERS+=("$2")
             shift 2
             ;;
         --discovery-port)
@@ -63,7 +69,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown argument: $1"
-            echo "Usage: $0 [--domain-id ID] [--profile gazebo|raspberry|rs485] [--config FILE] [--namespaces ns1,ns2] [--fixed-frame FRAME] [--no-tf-bridge] [--discovery-address HOST] [--discovery-port PORT] [--no-discovery-server]"
+            echo "Usage: $0 [--domain-id ID] [--profile gazebo|raspberry|rs485] [--config FILE] [--namespaces ns1,ns2] [--fixed-frame FRAME] [--no-tf-bridge] [--discovery-address HOST] [--peer HOST] [--no-discovery-server]"
             exit 1
             ;;
     esac
@@ -71,25 +77,22 @@ done
 
 DEFAULT_DOMAIN=$(python3 -c "import yaml; print(yaml.safe_load(open('${PROJECT_DIR}/config/profiles/${PROFILE}.yaml')).get('domain_id', 42))" 2>/dev/null || echo 42)
 export ROS_DOMAIN_ID="${DOMAIN_ID:-$DEFAULT_DOMAIN}"
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 unset ROS_LOCALHOST_ONLY
 
-if [ "$USE_DISCOVERY_SERVER" = "True" ]; then
-    if [ -n "$DISCOVERY_SERVER_ADDRESS" ]; then
-        if [[ "$DISCOVERY_SERVER_ADDRESS" == *":"* || "$DISCOVERY_SERVER_ADDRESS" == *";"* ]]; then
-            export ROS_DISCOVERY_SERVER="$DISCOVERY_SERVER_ADDRESS"
-        else
-            export ROS_DISCOVERY_SERVER="${DISCOVERY_SERVER_ADDRESS}:${DISCOVERY_SERVER_PORT}"
-        fi
-    elif [ -z "${ROS_DISCOVERY_SERVER:-}" ]; then
-        echo "WARNING: Discovery Server 已启用但未指定地址 (--discovery-address)。"
-        echo "         未设置 ROS_DISCOVERY_SERVER，将使用 multicast 发现。"
-        echo "         如果 dispatch 节点连接了 Discovery Server，RViz 将无法发现它们。"
-        echo "         请使用 --discovery-address <sidecar_ip> 或 --no-discovery-server。"
-        echo ""
-    fi
+# CycloneDDS unicast 发现配置（替代 FastDDS Discovery Server）
+source "${PROJECT_DIR}/scripts/launch/_dds_env.sh"
+
+if [ "$USE_DISCOVERY_SERVER" = "True" ] && [ ${#CYCLONE_PEERS[@]} -gt 0 ]; then
+    setup_cyclonedds_uri "${CYCLONE_PEERS[@]}"
+elif [ "$USE_DISCOVERY_SERVER" = "True" ]; then
+    echo "WARNING: CycloneDDS unicast 已启用但未指定 peer (--discovery-address)。"
+    echo "         将使用本机 loopback 发现；若 dispatch 在其它主机，RViz 将无法发现。"
+    echo "         请使用 --discovery-address <sidecar_or_vehicle_ip> 或 --no-discovery-server。"
+    echo ""
 else
     unset ROS_DISCOVERY_SERVER
+    unset CYCLONEDDS_URI
 fi
 
 export DISPLAY=${DISPLAY:-:0}
@@ -120,6 +123,7 @@ cleanup() {
             kill "$pid" 2>/dev/null || true
         fi
     done
+    cyclonedds_cleanup
 }
 trap cleanup EXIT INT TERM
 
@@ -157,7 +161,7 @@ echo "============================================="
 echo "  Multi-vehicle RViz"
 echo "  Profile:    $PROFILE"
 echo "  Domain ID:  $ROS_DOMAIN_ID"
-echo "  DDS发现:    ${ROS_DISCOVERY_SERVER:-multicast}"
+echo "  DDS发现:    CycloneDDS peers=[${CYCLONE_PEERS[*]:-本机loopback}] (禁 multicast)"
 echo "  Config:     $RVIZ_CONFIG"
 echo "  Namespaces: $NAMESPACES"
 echo "  TF bridge:  $USE_TF_BRIDGE (fixed frame: $FIXED_FRAME)"

@@ -55,7 +55,11 @@ done
 # ── 环境初始化 ──────────────────────────────────────────────────
 DEFAULT_DOMAIN=$(python3 -c "import yaml; print(yaml.safe_load(open('${PROJECT_DIR}/config/profiles/${PROFILE}.yaml')).get('domain_id', 42))" 2>/dev/null || echo 42)
 export ROS_DOMAIN_ID="${DOMAIN_ID:-$DEFAULT_DOMAIN}"
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+# CycloneDDS 本机发现（allowMulticast=false + loopback peer）
+source "${PROJECT_DIR}/scripts/launch/_dds_env.sh"
+setup_cyclonedds_uri
+trap cyclonedds_cleanup EXIT
 unset ROS_LOCALHOST_ONLY
 unset ROS_DISCOVERY_SERVER
 

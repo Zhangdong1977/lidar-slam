@@ -21,6 +21,7 @@ NAMESPACE=""
 USE_DISCOVERY_SERVER="True"
 DISCOVERY_SERVER_ADDRESS=""
 DISCOVERY_SERVER_PORT="11811"
+CYCLONE_PEERS=()
 
 # 解析参数
 while [[ $# -gt 0 ]]; do
@@ -35,6 +36,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --discovery-address)
             DISCOVERY_SERVER_ADDRESS="$2"
+            CYCLONE_PEERS+=("$2")
+            shift 2
+            ;;
+        --peer)
+            CYCLONE_PEERS+=("$2")
             shift 2
             ;;
         --discovery-port)
@@ -47,7 +53,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "未知参数: $1"
-            echo "用法: $0 [--domain-id ID] [--namespace NS] [--discovery-address HOST] [--discovery-port PORT] [--no-discovery-server]"
+            echo "用法: $0 [--domain-id ID] [--namespace NS] [--discovery-address HOST] [--peer HOST] [--no-discovery-server]"
             exit 1
             ;;
     esac
@@ -58,25 +64,22 @@ eval "$(conda shell.bash hook)"
 conda activate lidar_slam
 source /opt/ros/jazzy/setup.bash
 export ROS_DOMAIN_ID="${DOMAIN_ID:-${ROS_DOMAIN_ID:-42}}"
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 unset ROS_LOCALHOST_ONLY
-if [ "$USE_DISCOVERY_SERVER" = "True" ]; then
-    if [ -n "$DISCOVERY_SERVER_ADDRESS" ]; then
-        if [[ "$DISCOVERY_SERVER_ADDRESS" == *":"* || "$DISCOVERY_SERVER_ADDRESS" == *";"* ]]; then
-            export ROS_DISCOVERY_SERVER="$DISCOVERY_SERVER_ADDRESS"
-        else
-            export ROS_DISCOVERY_SERVER="${DISCOVERY_SERVER_ADDRESS}:${DISCOVERY_SERVER_PORT}"
-        fi
-    fi
+# CycloneDDS unicast 发现配置（替代 FastDDS Discovery Server）
+source "${PROJECT_DIR}/scripts/launch/_dds_env.sh"
+if [ "$USE_DISCOVERY_SERVER" = "True" ] && [ ${#CYCLONE_PEERS[@]} -gt 0 ]; then
+    setup_cyclonedds_uri "${CYCLONE_PEERS[@]}"
 else
     unset ROS_DISCOVERY_SERVER
+    unset CYCLONEDDS_URI
 fi
 source "${PROJECT_DIR}/install/setup.bash"
 
 echo "=== 键盘遥控模式 ==="
 echo "使用方向键或 WASD 控制车辆"
 echo "Namespace: ${NAMESPACE:-无}"
-echo "DDS发现: ${ROS_DISCOVERY_SERVER:-multicast}"
+echo "DDS发现: CycloneDDS peers=[${CYCLONE_PEERS[*]:-本机loopback}] (禁 multicast)"
 echo "按 Ctrl+C 退出"
 echo "===================="
 

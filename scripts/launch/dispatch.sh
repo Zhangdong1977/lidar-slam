@@ -42,6 +42,7 @@ START_GAZEBO="True"
 USE_DISCOVERY_SERVER="True"
 DISCOVERY_SERVER_ADDRESS=""
 DISCOVERY_SERVER_PORT="11811"
+CYCLONE_PEERS=()
 ACTION="start"
 STARTUP_STATUS_DELAY="${DISPATCH_STARTUP_STATUS_DELAY:-15}"
 NODE_INFO_TIMEOUT="${DISPATCH_NODE_INFO_TIMEOUT:-3}"
@@ -54,7 +55,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 usage() {
-    echo "用法: $0 [status] [--profile gazebo|rs485|raspberry] [--namespace NAME] [--spawn-x X] [--spawn-y Y] [--spawn-z Z] [--initial-x X] [--initial-y Y] [--initial-yaw YAW] [--map FILE] [--no-rviz] [--skip-cleanup] [--no-gazebo] [--domain-id ID] [--discovery-address HOST] [--discovery-port PORT] [--no-discovery-server]"
+    echo "用法: $0 [status] [--profile gazebo|rs485|raspberry] [--namespace NAME] [--spawn-x X] [--spawn-y Y] [--spawn-z Z] [--initial-x X] [--initial-y Y] [--initial-yaw YAW] [--map FILE] [--no-rviz] [--skip-cleanup] [--no-gazebo] [--domain-id ID] [--discovery-address HOST] [--peer HOST] [--no-discovery-server]"
 }
 
 # 解析参数
@@ -119,10 +120,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --discovery-address)
             DISCOVERY_SERVER_ADDRESS="$2"
+            CYCLONE_PEERS+=("$2")   # 复用为 CycloneDDS unicast peer（向后兼容）
+            shift 2
+            ;;
+        --peer)
+            CYCLONE_PEERS+=("$2")
             shift 2
             ;;
         --discovery-port)
-            DISCOVERY_SERVER_PORT="$2"
+            DISCOVERY_SERVER_PORT="$2"   # 保留向后兼容，CycloneDDS 不使用（端口由 domain id 决定）
             shift 2
             ;;
         --no-discovery-server)
@@ -141,7 +147,7 @@ done
 # 从 profile YAML 读取 domain_id（默认 42）
 DEFAULT_DOMAIN=$(python3 -c "import yaml; print(yaml.safe_load(open('${PROJECT_DIR}/config/profiles/${PROFILE}.yaml')).get('domain_id', 42))" 2>/dev/null || echo 42)
 export ROS_DOMAIN_ID="${DOMAIN_ID:-$DEFAULT_DOMAIN}"
-export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 if [ "$PROFILE" = "raspberry" ]; then
     source /opt/ros/jazzy/setup.bash
@@ -164,24 +170,22 @@ else
     source "${PROJECT_DIR}/install/setup.bash"
 fi
 
-if [ "$USE_DISCOVERY_SERVER" = "True" ]; then
-    if [ -n "$DISCOVERY_SERVER_ADDRESS" ]; then
-        if [[ "$DISCOVERY_SERVER_ADDRESS" == *":"* || "$DISCOVERY_SERVER_ADDRESS" == *";"* ]]; then
-            export ROS_DISCOVERY_SERVER="$DISCOVERY_SERVER_ADDRESS"
-        else
-            export ROS_DISCOVERY_SERVER="${DISCOVERY_SERVER_ADDRESS}:${DISCOVERY_SERVER_PORT}"
-        fi
-    elif [ "$ACTION" = "status" ] && [ -z "${ROS_DISCOVERY_SERVER:-}" ]; then
-        USE_DISCOVERY_SERVER="False"
-        unset ROS_DISCOVERY_SERVER
-    elif [ -z "${ROS_DISCOVERY_SERVER:-}" ]; then
-        echo "ERROR: Discovery Server 由 sidecar 端提供。请使用 --discovery-address <sidecar_ip>，"
-        echo "       或在启动前导出 ROS_DISCOVERY_SERVER=<sidecar_ip>:<port>。"
-        echo "       如需退回 multicast 发现，请使用 --no-discovery-server。"
-        exit 1
-    fi
+# ── CycloneDDS unicast 发现配置 ────────────────────────────────────
+# 替代原 FastDDS Discovery Server：用 CYCLONEDDS_URI 配置 unicast peers（禁 multicast）。
+# --discovery-address / --peer 指定对端主机 IP；--no-discovery-server 仅本机 loopback。
+source "${PROJECT_DIR}/scripts/launch/_dds_env.sh"
+trap cyclonedds_cleanup EXIT   # 任何退出路径都清理临时 cyclonedds xml
+
+if [ "$USE_DISCOVERY_SERVER" = "True" ] && [ ${#CYCLONE_PEERS[@]} -gt 0 ]; then
+    setup_cyclonedds_uri "${CYCLONE_PEERS[@]}"
+elif [ "$USE_DISCOVERY_SERVER" = "True" ] && [ "$ACTION" != "status" ]; then
+    echo "ERROR: 未指定 unicast peer。CycloneDDS 模式需用 --discovery-address <sidecar_ip> 或 --peer <ip>"
+    echo "       指定对端主机（仅本机使用/建图场景请加 --no-discovery-server）。"
+    exit 1
 else
+    # --no-discovery-server 或 status 探测：仅本机 loopback 发现，不设 CYCLONEDDS_URI
     unset ROS_DISCOVERY_SERVER
+    unset CYCLONEDDS_URI
 fi
 
 # ── Gazebo 多车初始位姿 ───────────────────────────────────────────
@@ -580,79 +584,41 @@ print_runtime_status() {
     fi
 }
 
-discovery_host_port_rows() {
-    echo "${ROS_DISCOVERY_SERVER:-}" | tr ';' '\n' | sed '/^$/d'
-}
-
 check_discovery_server() {
-    if [ "$USE_DISCOVERY_SERVER" != "True" ]; then
-        echo ""
-        echo "--- DDS Discovery 检查 ---"
-        print_status_line INFO "模式" "multicast，跳过 Discovery Server 探针"
-        return 0
-    fi
-
     echo ""
-    echo "--- DDS Discovery Server 检查 ---"
-    print_status_line INFO "配置" "ROS_DISCOVERY_SERVER=${ROS_DISCOVERY_SERVER}"
+    echo "--- CycloneDDS 发现检查 ---"
     print_status_line INFO "Domain" "ROS_DOMAIN_ID=${ROS_DOMAIN_ID}, RMW=${RMW_IMPLEMENTATION}"
+    print_status_line INFO "CYCLONEDDS_URI" "${CYCLONEDDS_URI:-（未设置，默认本机 loopback）}"
+    print_status_line INFO "Peers" "${CYCLONE_PEERS[*]:-（无，仅本机 loopback）}"
 
-    local endpoint host port route_found=0
-    while IFS= read -r endpoint; do
-        [ -n "$endpoint" ] || continue
-        host="${endpoint%:*}"
-        port="${endpoint##*:}"
-        if [ "$host" = "$port" ]; then
-            port="11811"
-        fi
-        if [ -z "$host" ]; then
-            continue
-        fi
-
-        if command -v ip >/dev/null 2>&1; then
-            local route
-            route="$(ip route get "$host" 2>/dev/null | head -1 || true)"
-            if [ -n "$route" ]; then
-                route_found=1
-                print_status_line OK "路由" "$route"
-            else
-                print_status_line ERROR "路由" "无法路由到 $host"
-            fi
-        fi
-
+    # peer 主机可达性（ICMP 可能被禁，仅 WARN 不致命）
+    local p host
+    for p in "${CYCLONE_PEERS[@]}"; do
+        [ -n "$p" ] || continue
+        host="${p%%:*}"
+        [ -z "$host" ] && continue
         if command -v ping >/dev/null 2>&1; then
             if timeout 3 ping -c 1 -W 1 "$host" >/dev/null 2>&1; then
-                print_status_line OK "主机连通" "$host"
+                print_status_line OK "peer 连通" "$host"
             else
-                print_status_line WARN "主机连通" "$host ping 无响应；可能被防火墙禁 ICMP"
+                print_status_line WARN "peer 连通" "$host ping 无响应（可能禁 ICMP，DDS 仍可达）"
             fi
         fi
+    done
 
-        if command -v nc >/dev/null 2>&1; then
-            if timeout 3 nc -uvz -w 1 "$host" "$port" >/dev/null 2>&1; then
-                print_status_line INFO "UDP探针" "$host:$port 可发送 UDP 探测包"
-            else
-                print_status_line WARN "UDP探针" "$host:$port 未得到 nc 成功结果"
-            fi
-        fi
-    done < <(discovery_host_port_rows)
-
-    if [ "$route_found" -eq 0 ]; then
-        print_status_line WARN "路由" "未能解析 Discovery Server endpoint"
-    fi
-
+    # 端到端探针：临时 pub/echo 验证当前 DDS 配置可互发现
     local probe_topic probe_payload echo_log echo_pid pub_status
     probe_topic="/dispatch_discovery_probe_${NAMESPACE:-global}_$$"
     probe_payload="discovery_probe_$$"
     echo_log="$(mktemp /tmp/dispatch_discovery_echo.XXXXXX)"
 
-    ROS_DISABLE_DAEMON=1 timeout 8 ros2 topic echo "$probe_topic" std_msgs/msg/String --once \
+    ROS_DISABLE_DAEMON=1 timeout 15 ros2 topic echo "$probe_topic" std_msgs/msg/String --once \
         >"$echo_log" 2>&1 &
     echo_pid=$!
-    sleep 1.0
+    sleep 3.0
 
     set +e
-    ROS_DISABLE_DAEMON=1 timeout 4 ros2 topic pub --once "$probe_topic" std_msgs/msg/String \
+    ROS_DISABLE_DAEMON=1 timeout 6 ros2 topic pub --once "$probe_topic" std_msgs/msg/String \
         "{data: '${probe_payload}'}" >/dev/null 2>&1
     pub_status=$?
     wait "$echo_pid"
@@ -660,17 +626,17 @@ check_discovery_server() {
     set -e
 
     if [ "$pub_status" -eq 0 ] && [ "$echo_status" -eq 0 ] && grep -q "$probe_payload" "$echo_log"; then
-        print_status_line OK "ROS发现探针" "两个临时 ROS 2 节点可通过当前 DDS 配置互相发现"
+        print_status_line OK "ROS发现探针" "两个临时 ROS 2 节点可通过 CycloneDDS 互相发现"
         rm -f "$echo_log"
         return 0
     fi
 
     print_status_line ERROR "ROS发现探针" "临时 pub/echo 未互相发现"
     echo "  诊断提示:"
-    echo "    - 确认 sidecar 上已启动: fastdds discovery -i 0 -l <sidecar_ip> -p ${DISCOVERY_SERVER_PORT}"
-    echo "    - 确认 UDP ${DISCOVERY_SERVER_PORT} 未被防火墙拦截"
-    echo "    - 确认 ROS_DISCOVERY_SERVER 中的 server-id 位置与 fastdds discovery -i 一致"
-    echo "    - 如需退回 multicast，请使用 --no-discovery-server"
+    echo "    - 确认对端 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp 且 ROS_DOMAIN_ID=${ROS_DOMAIN_ID} 一致"
+    echo "    - 确认对端 CYCLONEDDS_URI 的 peers 含本机 IP"
+    echo "    - 确认两端均 allowMulticast=false（本端 CYCLONEDDS_URI=${CYCLONEDDS_URI:-未设置}）"
+    echo "    - 仅本机使用请加 --no-discovery-server"
     echo "  pub 状态:  $pub_status"
     echo "  echo 状态: $echo_status"
     sed 's/^/  echo: /' "$echo_log" | tail -20
@@ -703,11 +669,12 @@ echo "  Spawn:     x=${SPAWN_X:-'(default)'} y=${SPAWN_Y:-'(default)'} z=${SPAWN
 echo "  AMCL init: x=${INITIAL_POSE_X} y=${INITIAL_POSE_Y} yaw=${INITIAL_POSE_YAW}"
 echo "  RViz:      $USE_RVIZ"
 echo "  Domain:    $ROS_DOMAIN_ID"
-if [ "$USE_DISCOVERY_SERVER" = "True" ]; then
-    echo "  DDS发现:   Discovery Server client ${ROS_DISCOVERY_SERVER} (sidecar 提供)"
+if [ "$USE_DISCOVERY_SERVER" = "True" ] && [ ${#CYCLONE_PEERS[@]} -gt 0 ]; then
+    echo "  DDS发现:   CycloneDDS unicast peers=[${CYCLONE_PEERS[*]}] (禁 multicast)"
 else
-    echo "  DDS发现:   multicast"
+    echo "  DDS发现:   CycloneDDS 本机 loopback (--no-discovery-server)"
 fi
+echo "  RMW:       $RMW_IMPLEMENTATION"
 echo "  地图:      $MAP_FILE"
 echo "  日志:      ${LOG_FILE}"
 echo "============================================="

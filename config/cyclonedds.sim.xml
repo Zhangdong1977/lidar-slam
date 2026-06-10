@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- 仿真场景车端 CycloneDDS 配置（开箱即用）。
+     车端（10.0.0.60）unicast peer 指向 sidecar（10.0.0.187）。
+     同机的 gazebo_1/gazebo_2 通过 loopback 自动发现，无需互配 peer。
+     手动验证可直接: export CYCLONEDDS_URI=file:///home/hello/lidar-slam/config/cyclonedds.sim.xml -->
+<cyclonedds xmlns="https://cdds.io/config">
+  <domain id="any">
+    <general><allowMulticast>false</allowMulticast></general>
+    <discovery>
+      <maxAutoParticipantIndex>200</maxAutoParticipantIndex>
+      <peers><peer address="127.0.0.1"/><peer address="10.0.0.187"/></peers>
+    </discovery>
+  </domain>
+</cyclonedds>
