@@ -579,9 +579,6 @@ print_runtime_status() {
         fi
     fi
 
-    if [ "$node_count" -gt 0 ]; then
-        print_node_topic_details "$nodes"
-    fi
 }
 
 check_discovery_server() {
