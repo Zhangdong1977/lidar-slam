@@ -1,10 +1,11 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────
-# CycloneDDS unicast 发现环境配置（公共函数）
+# CycloneDDS 发现环境配置（公共函数；模板 allowMulticast=spdp）
 #
 # 被 dispatch.sh / rviz_multi.sh / rviz_remote.sh / teleop.sh source。
-# 提供 setup_cyclonedds_uri() 生成禁 multicast + unicast peers 的临时 xml，
-# 并 export CYCLONEDDS_URI。同机节点靠 loopback 自动发现，互不需 peer。
+# 提供 setup_cyclonedds_uri() 生成 cyclonedds xml（模板 allowMulticast=spdp：
+# SPDP 发现走 multicast，数据走 unicast），并 export CYCLONEDDS_URI。
+# 同机节点靠 multicast loopback 自动发现。
 #
 # 用法:
 #   source "${PROJECT_DIR}/scripts/launch/_dds_env.sh"
@@ -17,15 +18,15 @@
 CYCLONE_TMP_XML="${CYCLONE_TMP_XML:-}"
 
 # setup_cyclonedds_uri [peer1] [peer2] ...
-# 生成 allowMulticast=false + unicast peers 的 cyclonedds xml，export CYCLONEDDS_URI。
+# 生成 cyclonedds xml（沿用模板 allowMulticast=spdp，拼接传入的 peers），export CYCLONEDDS_URI。
 # peer 格式支持 host 或 host:port（端口会被剥除，CycloneDDS peer 仅需 host，端口由 domain id 决定）。
 # 无参数时不设 CYCLONEDDS_URI，CycloneDDS 走默认（本机 loopback 发现）。
 setup_cyclonedds_uri() {
     unset ROS_DISCOVERY_SERVER   # 清除旧 FastDDS Discovery Server 语义，避免残留
 
     local template="${PROJECT_DIR}/config/cyclonedds.xml.template"
-    # 始终包含 loopback peer：CycloneDDS 在 allowMulticast=false 下不会自动 loopback 发现，
-    # 必须显式声明 127.0.0.1，否则同机多 participant（如 dispatch 的数十个节点）无法互发现。
+    # 始终含 loopback peer 作双保险：模板已 allowMulticast=spdp，本机 loopback 由 multicast
+    # 自动发现，127.0.0.1 理论冗余；保留可在 multicast 不可用时兜底。
     local peers_block="<peer address=\"127.0.0.1\"/>"
     local p host
 
