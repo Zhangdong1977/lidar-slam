@@ -567,7 +567,6 @@ print_runtime_status() {
     print_topic_status "cmd_vel" "cmd_vel"
 
     print_discovered_topics "$topics"
-    print_topic_endpoint_details "$topics"
 
     if [ "$node_count" -gt 0 ]; then
         echo ""
@@ -604,25 +603,30 @@ check_discovery_server() {
     done
 
     # 端到端探针：临时 pub/echo 验证当前 DDS 配置可互发现
-    local probe_topic probe_payload echo_log echo_pid pub_status
+    # pub 持续发布（-r 2）而非 --once：CycloneDDS SPDP 首次发现握手需要时间，
+    # --once 会在与 echo 完成互发现前就发完退出，echo 错过消息 → 假阴性（实测约 1/3 概率失败）。
+    # 持续发可覆盖发现 + 投递重试窗口，echo --once 收到首帧即退出，最后兜底 kill pub。
+    local probe_topic probe_payload echo_log echo_pid pub_pid
     probe_topic="/dispatch_discovery_probe_${NAMESPACE:-global}_$$"
     probe_payload="discovery_probe_$$"
     echo_log="$(mktemp /tmp/dispatch_discovery_echo.XXXXXX)"
 
-    ROS_DISABLE_DAEMON=1 timeout 15 ros2 topic echo "$probe_topic" std_msgs/msg/String --once \
+    ROS_DISABLE_DAEMON=1 timeout 20 ros2 topic echo "$probe_topic" std_msgs/msg/String --once \
         >"$echo_log" 2>&1 &
     echo_pid=$!
-    sleep 3.0
+    sleep 1
 
     set +e
-    ROS_DISABLE_DAEMON=1 timeout 6 ros2 topic pub --once "$probe_topic" std_msgs/msg/String \
-        "{data: '${probe_payload}'}" >/dev/null 2>&1
-    pub_status=$?
+    ROS_DISABLE_DAEMON=1 timeout 8 ros2 topic pub -r 2 "$probe_topic" std_msgs/msg/String \
+        "{data: '${probe_payload}'}" >/dev/null 2>&1 &
+    pub_pid=$!
     wait "$echo_pid"
     local echo_status=$?
+    kill "$pub_pid" 2>/dev/null || true
+    wait "$pub_pid" 2>/dev/null || true
     set -e
 
-    if [ "$pub_status" -eq 0 ] && [ "$echo_status" -eq 0 ] && grep -q "$probe_payload" "$echo_log"; then
+    if [ "$echo_status" -eq 0 ] && grep -q "$probe_payload" "$echo_log"; then
         print_status_line OK "ROS发现探针" "两个临时 ROS 2 节点可通过 CycloneDDS 互相发现"
         rm -f "$echo_log"
         return 0
@@ -632,10 +636,9 @@ check_discovery_server() {
     echo "  诊断提示:"
     echo "    - 确认对端 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp 且 ROS_DOMAIN_ID=${ROS_DOMAIN_ID} 一致"
     echo "    - 确认对端 CYCLONEDDS_URI 的 peers 含本机 IP"
-    echo "    - 确认两端均 allowMulticast=false（本端 CYCLONEDDS_URI=${CYCLONEDDS_URI:-未设置}）"
+    echo "    - 确认两端 allowMulticast 设置一致（本端 CYCLONEDDS_URI=${CYCLONEDDS_URI:-未设置}）"
     echo "    - 仅本机使用请加 --no-discovery-server"
-    echo "  pub 状态:  $pub_status"
-    echo "  echo 状态: $echo_status"
+    echo "  echo 退出码: $echo_status"
     sed 's/^/  echo: /' "$echo_log" | tail -20
     rm -f "$echo_log"
     return 1

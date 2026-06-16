@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<!-- CycloneDDS unicast 发现模板（禁 multicast）。
+<!-- CycloneDDS 发现模板（SPDP multicast + unicast peers）。
+     allowMulticast=spdp: SPDP 发现阶段用 multicast（本机 loopback 高效），数据传输走 unicast（避免网络风暴）。
      运行时由 _dds_env.sh 的 setup_cyclonedds_uri 读取，把下方 peers 占位
      替换为 <peer address="host"/> 拼接后生成临时 xml，再 export CYCLONEDDS_URI=file://<tmp>。
      手动使用可直接复制此文件为 .xml 并填入 peer 地址。 -->
 <cyclonedds xmlns="https://cdds.io/config">
   <domain id="any">
-    <general><allowMulticast>false</allowMulticast></general>
+    <general><allowMulticast>spdp</allowMulticast></general>
     <discovery>
       <maxAutoParticipantIndex>200</maxAutoParticipantIndex>
       <peers>{{CYCLONE_PEERS}}</peers>
