@@ -83,7 +83,9 @@ class OpentcsVehicleNode(LifecycleNode):
         self.declare_parameter('vehicle_name', 'ackermann_robot')
         vehicle_name = self.get_parameter('vehicle_name').value
 
-        self.declare_parameter('access_identity', 'ackermann_robot')
+        # access_identity falls back to vehicle_name when not explicitly set,
+        # so multi-vehicle deployments only need to override vehicle_name.
+        self.declare_parameter('access_identity', '')
         self.declare_parameter('namespace', '')
         self.declare_parameter('domain_id', 42)
         self.declare_parameter('base_frame', 'body_link')
@@ -138,7 +140,8 @@ class OpentcsVehicleNode(LifecycleNode):
 
         # Load parameters
         self._vehicle_name = self.get_parameter('vehicle_name').value
-        self._access_identity = self.get_parameter('access_identity').value
+        self._access_identity = (
+            self.get_parameter('access_identity').value or self._vehicle_name)
         self._base_frame = self.get_parameter('base_frame').value
         self._map_frame = self.get_parameter('map_frame').value
         pose_rate = self.get_parameter('pose_publish_rate').value
@@ -237,6 +240,7 @@ class OpentcsVehicleNode(LifecycleNode):
 
         self.get_logger().info(
             f'opentcs_vehicle_node configured: vehicle={self._vehicle_name}, '
+            f'access_identity={self._access_identity}, '
             f'base_frame={self._base_frame}, map_frame={self._map_frame}, '
             f'pose_rate={pose_rate}Hz, state_rate={1000/status_ms:.1f}Hz, '
             f'battery_sim={battery_sim}'

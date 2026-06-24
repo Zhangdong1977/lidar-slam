@@ -1,7 +1,9 @@
 opentcs_vehicle_node:
   ros__parameters:
     vehicle_name: "ackermann_robot"
-    access_identity: "ackermann_robot"
+    # access_identity 默认跟随 vehicle_name（多车场景由 dispatch.sh 注入 vehicle_name，
+    # 单车默认 = 上面的 vehicle_name）。需要独立设置时取消下一行注释。
+    # access_identity: "ackermann_robot"
     namespace: "c30_1"
     domain_id: 30
     base_frame: "body_link"
